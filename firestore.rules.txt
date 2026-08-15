@@ -1,0 +1,20 @@
+// Paste these into Firebase Console -> Firestore Database -> Rules.
+// This lets anyone read the leaderboard, and only write a "leaderboard/{id}"
+// document if it looks like a valid score entry (no auth required, since
+// this is a public leaderboard for a casual game).
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /leaderboard/{docId} {
+      allow read: if true;
+      allow write: if
+        request.resource.data.keys().hasAll(['name', 'best', 'updatedAt']) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() <= 16 &&
+        request.resource.data.best is int &&
+        request.resource.data.best >= 0 &&
+        request.resource.data.best <= 1000;
+    }
+  }
+}

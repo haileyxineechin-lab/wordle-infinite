@@ -5,18 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WORDLE // INFINITE</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="icon" type="image/png" href="word.png">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="board-frame">
+<div class="board-frame" id="boardFrame">
 
   <header class="depboard">
     <div class="depboard-left">
       <h1 class="title">WORDLE <span class="title-slash">//</span> INFINITE</h1>
-      <p class="subtitle">split-flap word engine</p>
+      <p class="subtitle" id="subtitleText">split-flap word engine</p>
     </div>
     <div class="depboard-right">
       <div class="counter" id="roundCounter">
@@ -31,6 +30,7 @@
         <span class="counter-label">BEST</span>
         <span class="counter-value" id="bestValue">0</span>
       </div>
+      <button id="leaderboardBtn" class="icon-btn" title="Leaderboard" aria-label="Leaderboard">☰</button>
       <button id="restartBtn" class="icon-btn" title="Reset session" aria-label="Reset session">↺</button>
     </div>
   </header>
@@ -47,8 +47,30 @@
 
 </div>
 
+<!-- Name entry overlay: shown before the first round -->
+<div id="nameOverlay" class="overlay">
+  <div class="overlay-card">
+    <h2 class="overlay-title">WORDLE <span class="title-slash">//</span> INFINITE</h2>
+    <p class="overlay-sub">Enter a name to join the leaderboard</p>
+    <input id="nameInput" class="overlay-input" type="text" maxlength="16" placeholder="YOUR NAME" autocomplete="off">
+    <button id="nameSubmitBtn" class="overlay-btn">START</button>
+    <p class="overlay-hint" id="nameHint"></p>
+  </div>
+</div>
+
+<!-- Leaderboard panel -->
+<div id="leaderboardPanel" class="leaderboard-panel">
+  <div class="leaderboard-header">
+    <span>LEADERBOARD</span>
+    <button id="leaderboardCloseBtn" class="icon-btn" aria-label="Close leaderboard">✕</button>
+  </div>
+  <ol id="leaderboardList" class="leaderboard-list">
+    <li class="leaderboard-empty">Loading…</li>
+  </ol>
+</div>
+
 <div id="toast" class="toast"></div>
 
-<script src="script.js"></script>
+<script type="module" src="script.js"></script>
 </body>
 </html>

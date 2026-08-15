@@ -3,6 +3,8 @@
    Split-flap departure-board style Wordle with endless rounds.
    ============================================================ */
 
+import { submitScore, fetchLeaderboard, isLeaderboardEnabled } from "./leaderboard.js";
+
 /* ---------- Word lists ---------- */
 
 // Words that can appear as the answer.
@@ -102,9 +104,10 @@ const EXTRA_VALID = [
 
 const VALID_GUESSES = new Set([...ANSWER_WORDS, ...EXTRA_VALID]);
 
-/* ---------- Persistent best score ---------- */
+/* ---------- Persistent best score & player name ---------- */
 
 const BEST_KEY = "wordleInfiniteBest";
+const NAME_KEY = "wordleInfiniteName";
 
 function loadBest(){
   try{
@@ -123,6 +126,22 @@ function saveBest(value){
   }
 }
 
+function loadName(){
+  try{
+    return localStorage.getItem(NAME_KEY) || "";
+  } catch (e){
+    return "";
+  }
+}
+
+function saveName(name){
+  try{
+    localStorage.setItem(NAME_KEY, name);
+  } catch (e){
+    // storage unavailable — name just won't be remembered next visit
+  }
+}
+
 /* ---------- Game state ---------- */
 
 const WORD_LENGTH = 5;
@@ -133,6 +152,7 @@ const state = {
   round: 1,
   streak: 0,
   best: loadBest(),
+  playerName: loadName(),
   guesses: [],        // array of submitted 5-letter strings
   results: [],         // array of result arrays (one per submitted guess) e.g. ['correct','absent',...]
   currentGuess: "",
@@ -150,12 +170,90 @@ const roundValueEl = document.getElementById("roundValue");
 const streakValueEl = document.getElementById("streakValue");
 const bestValueEl = document.getElementById("bestValue");
 const restartBtn = document.getElementById("restartBtn");
+const subtitleText = document.getElementById("subtitleText");
+
+const nameOverlay = document.getElementById("nameOverlay");
+const nameInput = document.getElementById("nameInput");
+const nameSubmitBtn = document.getElementById("nameSubmitBtn");
+const nameHint = document.getElementById("nameHint");
+
+const leaderboardBtn = document.getElementById("leaderboardBtn");
+const leaderboardCloseBtn = document.getElementById("leaderboardCloseBtn");
+const leaderboardPanel = document.getElementById("leaderboardPanel");
+const leaderboardList = document.getElementById("leaderboardList");
 
 const KEY_ROWS = [
   ["q","w","e","r","t","y","u","i","o","p"],
   ["a","s","d","f","g","h","j","k","l"],
   ["enter","z","x","c","v","b","n","m","back"]
 ];
+
+/* ---------- Name entry ---------- */
+
+function startWithName(name){
+  const trimmed = name.trim().slice(0, 16);
+  if (!trimmed){
+    nameHint.textContent = "Please enter a name.";
+    return;
+  }
+  state.playerName = trimmed;
+  saveName(trimmed);
+  subtitleText.textContent = `playing as ${trimmed}`;
+  nameOverlay.classList.remove("show");
+  newRound(true);
+  updateCounters();
+}
+
+nameSubmitBtn.addEventListener("click", () => startWithName(nameInput.value));
+nameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") startWithName(nameInput.value);
+});
+
+function showNameOverlay(){
+  nameInput.value = state.playerName || "";
+  nameHint.textContent = isLeaderboardEnabled() ? "" : "";
+  nameOverlay.classList.add("show");
+  nameInput.focus();
+}
+
+/* ---------- Leaderboard panel ---------- */
+
+async function renderLeaderboard(){
+  leaderboardList.innerHTML = `<li class="leaderboard-empty">Loading…</li>`;
+  const rows = await fetchLeaderboard(10);
+  if (!rows.length){
+    leaderboardList.innerHTML = `<li class="leaderboard-empty">No scores yet — be the first!</li>`;
+    return;
+  }
+  leaderboardList.innerHTML = "";
+  rows.forEach((row, i) => {
+    const li = document.createElement("li");
+    li.className = "leaderboard-row";
+    if (state.playerName && row.name && row.name.toLowerCase() === state.playerName.toLowerCase()){
+      li.classList.add("me");
+    }
+    li.innerHTML = `
+      <span class="lb-rank">${i + 1}</span>
+      <span class="lb-name">${escapeHtml(row.name || "—")}</span>
+      <span class="lb-score">${row.best ?? 0}</span>
+    `;
+    leaderboardList.appendChild(li);
+  });
+}
+
+function escapeHtml(str){
+  const div = document.createElement("div");
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+leaderboardBtn.addEventListener("click", () => {
+  leaderboardPanel.classList.add("show");
+  renderLeaderboard();
+});
+leaderboardCloseBtn.addEventListener("click", () => {
+  leaderboardPanel.classList.remove("show");
+});
 
 /* ---------- Init ---------- */
 
@@ -256,6 +354,7 @@ function showToast(text){
 
 function handleKey(key){
   if (state.gameOver) return;
+  if (nameOverlay.classList.contains("show")) return;
 
   if (key === "back"){
     state.currentGuess = state.currentGuess.slice(0, -1);
@@ -334,6 +433,9 @@ function submitGuess(){
       state.streak += 1;
       state.best = Math.max(state.best, state.streak);
       saveBest(state.best);
+      if (state.playerName){
+        submitScore(state.playerName, state.best);
+      }
       updateCounters();
       setMessage(`Solved in ${state.guesses.length}/${MAX_GUESSES} — next round starting…`, "win");
       setTimeout(() => newRound(false), 1600);
@@ -399,5 +501,5 @@ restartBtn.addEventListener("click", resetSession);
 
 /* ---------- Boot ---------- */
 
-newRound(true);
 updateCounters();
+showNameOverlay();
