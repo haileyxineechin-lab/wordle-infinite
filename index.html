@@ -11,40 +11,54 @@
 </head>
 <body>
 
-<div class="board-frame" id="boardFrame">
+<div class="app-layout">
 
-  <header class="depboard">
-    <div class="depboard-left">
-      <h1 class="title">WORDLE <span class="title-slash">//</span> INFINITE</h1>
-      <p class="subtitle" id="subtitleText">split-flap word engine</p>
+  <div class="board-frame" id="boardFrame">
+
+    <header class="depboard">
+      <div class="depboard-left">
+        <h1 class="title">WORDLE <span class="title-slash">//</span> INFINITE</h1>
+        <p class="subtitle" id="subtitleText">split-flap word engine</p>
+      </div>
+      <div class="depboard-right">
+        <div class="counter" id="roundCounter">
+          <span class="counter-label">ROUND</span>
+          <span class="counter-value" id="roundValue">001</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">STREAK</span>
+          <span class="counter-value" id="streakValue">0</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">BEST</span>
+          <span class="counter-value" id="bestValue">0</span>
+        </div>
+        <button id="restartBtn" class="icon-btn" title="Reset session" aria-label="Reset session">↺</button>
+      </div>
+    </header>
+
+    <div class="message-rail" id="messageRail" aria-live="polite"></div>
+
+    <main class="board-wrap">
+      <div id="board" class="board"></div>
+    </main>
+
+    <footer class="keyboard-wrap">
+      <div id="keyboard" class="keyboard"></div>
+    </footer>
+
+  </div>
+
+  <!-- Leaderboard: always visible, updates live from Firestore -->
+  <aside id="leaderboardPanel" class="leaderboard-panel">
+    <div class="leaderboard-header">
+      <span>LIVE LEADERBOARD</span>
+      <span class="leaderboard-dot" id="leaderboardDot" title="Connection status"></span>
     </div>
-    <div class="depboard-right">
-      <div class="counter" id="roundCounter">
-        <span class="counter-label">ROUND</span>
-        <span class="counter-value" id="roundValue">001</span>
-      </div>
-      <div class="counter">
-        <span class="counter-label">STREAK</span>
-        <span class="counter-value" id="streakValue">0</span>
-      </div>
-      <div class="counter">
-        <span class="counter-label">BEST</span>
-        <span class="counter-value" id="bestValue">0</span>
-      </div>
-      <button id="leaderboardBtn" class="icon-btn" title="Leaderboard" aria-label="Leaderboard">☰</button>
-      <button id="restartBtn" class="icon-btn" title="Reset session" aria-label="Reset session">↺</button>
-    </div>
-  </header>
-
-  <div class="message-rail" id="messageRail" aria-live="polite"></div>
-
-  <main class="board-wrap">
-    <div id="board" class="board"></div>
-  </main>
-
-  <footer class="keyboard-wrap">
-    <div id="keyboard" class="keyboard"></div>
-  </footer>
+    <ol id="leaderboardList" class="leaderboard-list">
+      <li class="leaderboard-empty">Loading…</li>
+    </ol>
+  </aside>
 
 </div>
 
@@ -57,17 +71,6 @@
     <button id="nameSubmitBtn" class="overlay-btn">START</button>
     <p class="overlay-hint" id="nameHint"></p>
   </div>
-</div>
-
-<!-- Leaderboard panel -->
-<div id="leaderboardPanel" class="leaderboard-panel">
-  <div class="leaderboard-header">
-    <span>LEADERBOARD</span>
-    <button id="leaderboardCloseBtn" class="icon-btn" aria-label="Close leaderboard">✕</button>
-  </div>
-  <ol id="leaderboardList" class="leaderboard-list">
-    <li class="leaderboard-empty">Loading…</li>
-  </ol>
 </div>
 
 <div id="toast" class="toast"></div>

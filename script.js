@@ -7,7 +7,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
-  getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs
+  getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -52,21 +52,28 @@ async function submitScore(name, best){
   }
 }
 
-// Returns an array of { name, best } sorted by best descending.
-async function fetchLeaderboard(limitCount = 10){
-  if (!leaderboardEnabled) return [];
+// Subscribes to live top-N leaderboard updates. Calls onUpdate(rows) every
+// time the data changes, and onError(err) if the subscription fails.
+function subscribeLeaderboard(limitCount, onUpdate, onError){
+  if (!leaderboardEnabled){
+    onError(new Error("Firebase not initialized"));
+    return () => {};
+  }
   try {
     const q = query(collection(db, "leaderboard"), orderBy("best", "desc"), limit(limitCount));
-    const snap = await getDocs(q);
-    return snap.docs.map(d => d.data());
+    return onSnapshot(
+      q,
+      (snap) => onUpdate(snap.docs.map(d => d.data())),
+      (err) => {
+        console.error("Leaderboard subscription error:", err);
+        onError(err);
+      }
+    );
   } catch (e) {
-    console.warn("fetchLeaderboard failed", e);
-    return [];
+    console.error("Leaderboard subscription failed to start:", e);
+    onError(e);
+    return () => {};
   }
-}
-
-function isLeaderboardEnabled(){
-  return leaderboardEnabled;
 }
 
 /* ---------- Word lists ---------- */
@@ -241,10 +248,9 @@ const nameInput = document.getElementById("nameInput");
 const nameSubmitBtn = document.getElementById("nameSubmitBtn");
 const nameHint = document.getElementById("nameHint");
 
-const leaderboardBtn = document.getElementById("leaderboardBtn");
-const leaderboardCloseBtn = document.getElementById("leaderboardCloseBtn");
 const leaderboardPanel = document.getElementById("leaderboardPanel");
 const leaderboardList = document.getElementById("leaderboardList");
+const leaderboardDot = document.getElementById("leaderboardDot");
 
 const KEY_ROWS = [
   ["q","w","e","r","t","y","u","i","o","p"],
@@ -275,16 +281,14 @@ nameInput.addEventListener("keydown", (e) => {
 
 function showNameOverlay(){
   nameInput.value = state.playerName || "";
-  nameHint.textContent = isLeaderboardEnabled() ? "" : "";
+  nameHint.textContent = "";
   nameOverlay.classList.add("show");
   nameInput.focus();
 }
 
-/* ---------- Leaderboard panel ---------- */
+/* ---------- Leaderboard panel (live) ---------- */
 
-async function renderLeaderboard(){
-  leaderboardList.innerHTML = `<li class="leaderboard-empty">Loading…</li>`;
-  const rows = await fetchLeaderboard(10);
+function renderLeaderboardRows(rows){
   if (!rows.length){
     leaderboardList.innerHTML = `<li class="leaderboard-empty">No scores yet — be the first!</li>`;
     return;
@@ -311,13 +315,21 @@ function escapeHtml(str){
   return div.innerHTML;
 }
 
-leaderboardBtn.addEventListener("click", () => {
-  leaderboardPanel.classList.add("show");
-  renderLeaderboard();
-});
-leaderboardCloseBtn.addEventListener("click", () => {
-  leaderboardPanel.classList.remove("show");
-});
+function startLeaderboardSubscription(){
+  subscribeLeaderboard(
+    10,
+    (rows) => {
+      leaderboardDot.classList.remove("error");
+      leaderboardDot.classList.add("live");
+      renderLeaderboardRows(rows);
+    },
+    (err) => {
+      leaderboardDot.classList.remove("live");
+      leaderboardDot.classList.add("error");
+      leaderboardList.innerHTML = `<li class="leaderboard-empty">Couldn't load leaderboard.<br>Check the browser console (F12) for details.</li>`;
+    }
+  );
+}
 
 /* ---------- Init ---------- */
 
@@ -566,4 +578,5 @@ restartBtn.addEventListener("click", resetSession);
 /* ---------- Boot ---------- */
 
 updateCounters();
+startLeaderboardSubscription();
 showNameOverlay();
