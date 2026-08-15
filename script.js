@@ -3,7 +3,71 @@
    Split-flap departure-board style Wordle with endless rounds.
    ============================================================ */
 
-import { submitScore, fetchLeaderboard, isLeaderboardEnabled } from "./leaderboard.js";
+/* ---------- Firebase / leaderboard (Firestore) ---------- */
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
+import {
+  getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs
+} from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDQlqDEy_XKPsvz6PeMIG-I_2bsqJ7Cvgk",
+  authDomain: "wordle-infinite-7a04f.firebaseapp.com",
+  projectId: "wordle-infinite-7a04f",
+  storageBucket: "wordle-infinite-7a04f.firebasestorage.app",
+  messagingSenderId: "955539970175",
+  appId: "1:955539970175:web:47bc5d50300284fac3074a",
+  measurementId: "G-BNVY2QYBJ3"
+};
+
+let db = null;
+let leaderboardEnabled = true;
+try {
+  const app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+} catch (e) {
+  console.warn("Firebase failed to initialize — leaderboard disabled.", e);
+  leaderboardEnabled = false;
+}
+
+function docIdFor(name){
+  return name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 32) || "player";
+}
+
+// Writes the player's score if it beats their previously stored best.
+async function submitScore(name, best){
+  if (!leaderboardEnabled || !name) return null;
+  try {
+    const ref = doc(db, "leaderboard", docIdFor(name));
+    const snap = await getDoc(ref);
+    const prevBest = snap.exists() ? (snap.data().best || 0) : 0;
+    if (best > prevBest){
+      await setDoc(ref, { name: name.trim().slice(0, 16), best, updatedAt: Date.now() });
+      return best;
+    }
+    return prevBest;
+  } catch (e) {
+    console.warn("submitScore failed", e);
+    return null;
+  }
+}
+
+// Returns an array of { name, best } sorted by best descending.
+async function fetchLeaderboard(limitCount = 10){
+  if (!leaderboardEnabled) return [];
+  try {
+    const q = query(collection(db, "leaderboard"), orderBy("best", "desc"), limit(limitCount));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data());
+  } catch (e) {
+    console.warn("fetchLeaderboard failed", e);
+    return [];
+  }
+}
+
+function isLeaderboardEnabled(){
+  return leaderboardEnabled;
+}
 
 /* ---------- Word lists ---------- */
 
