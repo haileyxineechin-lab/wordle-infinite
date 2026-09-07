@@ -7,24 +7,31 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
-  getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, onSnapshot
+  initializeFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDQlqDEy_XKPsvz6PeMIG-I_2bsqJ7Cvgk",
-  authDomain: "wordle-infinite-7a04f.firebaseapp.com",
-  projectId: "wordle-infinite-7a04f",
-  storageBucket: "wordle-infinite-7a04f.firebasestorage.app",
-  messagingSenderId: "955539970175",
-  appId: "1:955539970175:web:47bc5d50300284fac3074a",
-  measurementId: "G-BNVY2QYBJ3"
+  apiKey: "AIzaSyBQOworAdvB_cXDE56kGGdgThHEfJYW1Gc",
+  authDomain: "wordleinfinite-412f5.firebaseapp.com",
+  projectId: "wordleinfinite-412f5",
+  storageBucket: "wordleinfinite-412f5.firebasestorage.app",
+  messagingSenderId: "539315532118",
+  appId: "1:539315532118:web:aab65c1a0735bdffaae6f7",
+  measurementId: "G-21P9BWQ4WR"
 };
 
 let db = null;
 let leaderboardEnabled = true;
 try {
   const app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
+  // Some networks (corporate firewalls, antivirus, certain proxies) block
+  // Firestore's default streaming (WebChannel) connection, which makes
+  // onSnapshot hang forever with no error. Long-polling is slower per
+  // update but works almost everywhere.
+  db = initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+    useFetchStreams: false
+  });
 } catch (e) {
   console.warn("Firebase failed to initialize — leaderboard disabled.", e);
   leaderboardEnabled = false;
@@ -316,14 +323,28 @@ function escapeHtml(str){
 }
 
 function startLeaderboardSubscription(){
+  let settled = false;
+
+  const timeoutId = setTimeout(() => {
+    if (settled) return;
+    settled = true;
+    leaderboardDot.classList.remove("live");
+    leaderboardDot.classList.add("error");
+    leaderboardList.innerHTML = `<li class="leaderboard-empty">Couldn't connect to the leaderboard.<br>Check your network/firewall, or see the console (F12).</li>`;
+  }, 8000);
+
   subscribeLeaderboard(
     10,
     (rows) => {
+      settled = true;
+      clearTimeout(timeoutId);
       leaderboardDot.classList.remove("error");
       leaderboardDot.classList.add("live");
       renderLeaderboardRows(rows);
     },
     (err) => {
+      settled = true;
+      clearTimeout(timeoutId);
       leaderboardDot.classList.remove("live");
       leaderboardDot.classList.add("error");
       leaderboardList.innerHTML = `<li class="leaderboard-empty">Couldn't load leaderboard.<br>Check the browser console (F12) for details.</li>`;
