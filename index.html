@@ -33,9 +33,22 @@
           <span class="counter-label">BEST</span>
           <span class="counter-value" id="bestValue">0</span>
         </div>
+        <div class="counter">
+          <span class="counter-label">POINTS</span>
+          <span class="counter-value" id="pointsValue">0</span>
+        </div>
         <button id="restartBtn" class="icon-btn" title="Reset session" aria-label="Reset session">↺</button>
       </div>
     </header>
+
+    <div class="action-bar">
+      <button id="hintBtn" class="action-btn" title="Reveal one correct letter for 150 points">
+        💡 HINT <span class="action-btn-cost">150 pts</span>
+      </button>
+      <button id="roomBtn" class="action-btn">
+        👥 <span id="roomLabel">PLAY WITH FRIENDS</span>
+      </button>
+    </div>
 
     <div class="message-rail" id="messageRail" aria-live="polite"></div>
 
@@ -55,6 +68,12 @@
       <span>LIVE LEADERBOARD</span>
       <span class="leaderboard-dot" id="leaderboardDot" title="Connection status"></span>
     </div>
+    <div class="leaderboard-col-header">
+      <span class="lb-rank">#</span>
+      <span class="lb-name">NAME</span>
+      <span class="lb-score">STREAK</span>
+      <span class="lb-points">POINTS</span>
+    </div>
     <ol id="leaderboardList" class="leaderboard-list">
       <li class="leaderboard-empty">Loading…</li>
     </ol>
@@ -70,6 +89,25 @@
     <input id="nameInput" class="overlay-input" type="text" maxlength="16" placeholder="YOUR NAME" autocomplete="off">
     <button id="nameSubmitBtn" class="overlay-btn">START</button>
     <p class="overlay-hint" id="nameHint"></p>
+  </div>
+</div>
+
+<!-- Room overlay: create or join a shared-streak room with friends -->
+<div id="roomOverlay" class="overlay">
+  <div class="overlay-card">
+    <h2 class="overlay-title">PLAY <span class="title-slash">//</span> TOGETHER</h2>
+    <p class="overlay-sub" id="roomStatusText">Not in a room</p>
+
+    <div id="roomJoinFields">
+      <input id="roomCodeInput" class="overlay-input" type="text" maxlength="5" placeholder="ROOM CODE" autocomplete="off">
+      <button id="roomJoinBtn" class="overlay-btn">JOIN ROOM</button>
+      <button id="roomCreateBtn" class="overlay-btn overlay-btn-secondary">CREATE NEW ROOM</button>
+    </div>
+
+    <button id="roomLeaveBtn" class="overlay-btn overlay-btn-danger" style="display:none;">LEAVE ROOM</button>
+
+    <p class="overlay-hint" id="roomHint"></p>
+    <button id="roomCloseBtn" class="overlay-btn overlay-btn-secondary">CLOSE</button>
   </div>
 </div>
 
