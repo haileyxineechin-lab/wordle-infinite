@@ -45,10 +45,16 @@
       <button id="hintBtn" class="action-btn" title="Reveal one correct letter for 150 points">
         💡 HINT <span class="action-btn-cost">150 pts</span>
       </button>
+      <button id="revealBtn" class="action-btn" title="Reveal the answer and skip to the next round (no points awarded)">
+        🔓 REVEAL <span class="action-btn-cost">500 pts</span>
+      </button>
       <button id="roomBtn" class="action-btn">
         👥 <span id="roomLabel">PLAY WITH FRIENDS</span>
       </button>
     </div>
+
+    <!-- Live view of friends' typing/hints while in a room -->
+    <div id="friendsPanel" class="friends-panel" style="display:none;"></div>
 
     <div class="message-rail" id="messageRail" aria-live="polite"></div>
 
@@ -97,6 +103,9 @@
   <div class="overlay-card">
     <h2 class="overlay-title">PLAY <span class="title-slash">//</span> TOGETHER</h2>
     <p class="overlay-sub" id="roomStatusText">Not in a room</p>
+
+    <div id="roomCodeBig" class="room-code-big" style="display:none;"></div>
+    <button id="roomCopyBtn" class="overlay-btn overlay-btn-secondary" style="display:none;">COPY CODE</button>
 
     <div id="roomJoinFields">
       <input id="roomCodeInput" class="overlay-input" type="text" maxlength="5" placeholder="ROOM CODE" autocomplete="off">

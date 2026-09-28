@@ -7,7 +7,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
-  initializeFirestore, doc, getDoc, setDoc, updateDoc, collection, query, orderBy, limit, onSnapshot,
+  initializeFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit, onSnapshot,
   increment, arrayUnion, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
@@ -134,15 +134,17 @@ function subscribeLeaderboard(limitCount, onUpdate, onError){
 /* ---------- Rooms (shared board with friends — Firestore) ---------- */
 //
 // A room is one Firestore document, rooms/{code}:
-//   { code, answer, round, seq, streak, guesses: [words], updatedAt }
-// Everyone in the room subscribes to that document live, so all players
-// see the same word, the same guesses, and the same streak. It runs over
-// normal HTTPS through Firebase, so it works on any network (unlike
-// peer-to-peer connections, which school/office networks often block),
-// and nobody has to keep a tab open for the room to stay alive.
+//   { code, answer, round, seq, streak, revealedBy, guesses: [words], updatedAt }
+// Everyone in the room subscribes to it live, so all players see the same
+// word and the same guesses. It runs over normal HTTPS through Firebase,
+// so it works on any network, and nobody has to keep a tab open.
 //
 // `seq` increments every time a new round starts. Any player's browser can
 // start the next round; a transaction makes sure only the first one wins.
+// (Streaks are not counted inside rooms — the `streak` field stays at 0.)
+//
+// Each player's in-progress typing/hints are shown to friends through a
+// separate small document per player (see "Live presence" below).
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
 
@@ -168,23 +170,6 @@ function makeRoomHandle(code, isHost){
   const handle = {
     code: code.toUpperCase(),
     isHost,
-    knownStreak: 0,
-
-    // Raise the room's streak (never lowers it).
-    pushStreak(streak){
-      if (streak > handle.knownStreak){
-        handle.knownStreak = streak;
-        updateDoc(ref, { streak, updatedAt: Date.now() })
-          .catch(e => console.warn("pushStreak failed", e));
-      }
-    },
-
-    // A lost round resets the shared streak for everyone.
-    resetStreak(){
-      handle.knownStreak = 0;
-      updateDoc(ref, { streak: 0, updatedAt: Date.now() })
-        .catch(e => console.warn("resetStreak failed", e));
-    },
 
     // Every guess (yours or a friend's) goes through the shared document;
     // each browser applies it when the live update arrives.
@@ -194,6 +179,12 @@ function makeRoomHandle(code, isHost){
           console.warn("sendGuess failed", e);
           showToast("Couldn't send guess");
         });
+    },
+
+    // Ends the round for everyone by revealing the answer.
+    revealAnswer(){
+      updateDoc(ref, { revealedBy: state.playerName || "someone", updatedAt: Date.now() })
+        .catch(e => console.warn("revealAnswer failed", e));
     },
 
     // Starts the next shared round. Every browser tries this when a round
@@ -211,7 +202,7 @@ function makeRoomHandle(code, isHost){
             round: lost ? 1 : (d.round || 0) + 1,
             seq: d.seq + 1,
             guesses: [],
-            streak: lost ? 0 : (d.streak || 0),
+            revealedBy: "",
             updatedAt: Date.now()
           });
         });
@@ -229,7 +220,7 @@ function makeRoomHandle(code, isHost){
           if (!snap.exists()) return;
           const d = snap.data();
           tx.update(ref, {
-            answer, round: 1, seq: d.seq + 1, guesses: [], streak: 0, updatedAt: Date.now()
+            answer, round: 1, seq: d.seq + 1, guesses: [], revealedBy: "", updatedAt: Date.now()
           });
         });
       } catch (e) {
@@ -242,7 +233,7 @@ function makeRoomHandle(code, isHost){
     _subscribe(){
       unsubscribe = onSnapshot(
         ref,
-        (snap) => { if (snap.exists()) handleRoomSnapshot(handle, snap.data()); },
+        (snap) => { if (snap.exists()) handleRoomSnapshot(snap.data()); },
         (err) => {
           console.error("Room subscription error:", err);
           showToast("Lost connection to the room");
@@ -261,14 +252,11 @@ function makeRoomHandle(code, isHost){
 }
 
 // Called on every live update of the room document.
-function handleRoomSnapshot(handle, data){
-  handle.knownStreak = data.streak || 0;
-
+function handleRoomSnapshot(data){
   if (data.seq !== roomLastSeq){
     // First update after joining, or a brand-new round started.
-    const isJoin = roomLastSeq === null;
     roomLastSeq = data.seq;
-    applyRoomState(data, isJoin);
+    applyRoomState(data);
   } else {
     // Same round: show any guesses we haven't displayed yet.
     const guesses = Array.isArray(data.guesses) ? data.guesses : [];
@@ -276,23 +264,20 @@ function handleRoomSnapshot(handle, data){
       if (state.guesses.length >= MAX_GUESSES || state.guesses.includes(state.answer)) break;
       commitGuess(guesses[i]);
     }
-    onRoomStreakUpdate(data.streak || 0);
   }
+  // Someone in the room paid to reveal the answer — end the round for all.
+  if (data.revealedBy) showRevealedAnswer();
 }
 
-// Sets up the shared round from the room document: the shared answer,
-// round number, and silently replays guesses already made (no animation,
+// Sets up the shared round from the room document: the shared answer and
+// round number, plus a silent replay of guesses already made (no animation,
 // no points — those were handled when they were first made).
-function applyRoomState(data, isJoin){
+function applyRoomState(data){
   const guesses = Array.isArray(data.guesses) ? data.guesses : [];
   state.round = data.round;
   newRound(true, data.answer);
   guesses.forEach(w => replayGuess(w));
   state.gameOver = guesses.includes(data.answer) || guesses.length >= MAX_GUESSES;
-  // On join, keep our streak if it's higher; on a new shared round the
-  // room's streak is the source of truth.
-  state.streak = isJoin ? Math.max(state.streak, data.streak || 0) : (data.streak || 0);
-  streakAtRoundStart = state.streak;
   renderBoard();
   renderKeyboard();
   updateCounters();
@@ -314,16 +299,18 @@ async function createRoom(){
     answer: state.answer,
     round: state.round,
     seq: 1,
-    streak: state.streak,
+    streak: 0,
+    revealedBy: "",
     guesses: state.guesses.slice(),
     updatedAt: Date.now()
   });
 
   roomLastSeq = 1; // we're already on this round — don't reset our board
   const handle = makeRoomHandle(code, true);
-  handle.knownStreak = state.streak;
   activeRoom = handle;
   handle._subscribe();
+  startPresence();
+  updateCounters();
   return code;
 }
 
@@ -335,11 +322,108 @@ async function joinRoom(code){
 
   roomLastSeq = null; // first snapshot will load the room's round
   const handle = makeRoomHandle(code, false);
-  handle.knownStreak = snap.data().streak || 0;
   activeRoom = handle;
   handle._subscribe();
-  // If our own streak is higher than the room's, lift the room up to it.
-  handle.pushStreak(state.streak);
+  startPresence();
+  updateCounters();
+}
+
+/* ---------- Live presence (see friends' typing and hints) ---------- */
+//
+// Each player writes one small document to "roomPlayers" describing what
+// they're currently typing and which letters came from hints. Everyone in
+// the room watches those documents, so you can see what your friends are
+// trying and avoid repeating the same guess.
+
+const PRESENCE_COLLECTION = "roomPlayers";
+const PRESENCE_STALE_MS = 3 * 60 * 1000;   // hide friends silent for 3 min
+const PRESENCE_HEARTBEAT_MS = 60 * 1000;   // re-announce ourselves every minute
+
+let presenceUnsub = null;
+let presenceTimer = null;
+let presenceHeartbeat = null;
+let lastFriends = [];
+
+function presenceDocRef(code){
+  return doc(db, PRESENCE_COLLECTION, `${code.toUpperCase()}_${docIdFor(state.playerName || "player")}`);
+}
+
+// Debounced so fast typing doesn't spam the database.
+function schedulePresence(){
+  if (!activeRoom || !state.playerName) return;
+  clearTimeout(presenceTimer);
+  presenceTimer = setTimeout(writePresence, 200);
+}
+
+function writePresence(){
+  if (!activeRoom || !state.playerName || !leaderboardEnabled) return;
+  setDoc(presenceDocRef(activeRoom.code), {
+    room: activeRoom.code,
+    name: state.playerName.slice(0, 16),
+    typed: state.slots.map(s => s || " ").join(""),
+    locked: state.locked.map(b => (b ? "1" : "0")).join(""),
+    updatedAt: Date.now()
+  }).catch(e => console.warn("presence write failed", e));
+}
+
+function startPresence(){
+  stopPresence();
+  if (!activeRoom || !leaderboardEnabled) return;
+  const q = query(collection(db, PRESENCE_COLLECTION), where("room", "==", activeRoom.code));
+  presenceUnsub = onSnapshot(q, (snap) => {
+    const me = (state.playerName || "").toLowerCase();
+    lastFriends = snap.docs
+      .map(d => d.data())
+      .filter(p => (p.name || "").toLowerCase() !== me);
+    renderFriends();
+  }, (err) => console.warn("presence subscription error", err));
+  presenceHeartbeat = setInterval(() => { renderFriends(); writePresence(); }, PRESENCE_HEARTBEAT_MS);
+  writePresence();
+  renderFriends();
+}
+
+function stopPresence(){
+  clearTimeout(presenceTimer);
+  clearInterval(presenceHeartbeat);
+  if (presenceUnsub) presenceUnsub();
+  presenceUnsub = null;
+  presenceHeartbeat = null;
+  lastFriends = [];
+}
+
+// Removes our presence document (called when leaving a room).
+function clearMyPresence(code){
+  if (!leaderboardEnabled || !code || !state.playerName) return;
+  deleteDoc(presenceDocRef(code)).catch(e => console.warn("presence delete failed", e));
+}
+
+function renderFriends(){
+  if (!activeRoom){
+    friendsPanel.style.display = "none";
+    return;
+  }
+  friendsPanel.style.display = "block";
+  const now = Date.now();
+  const friends = lastFriends.filter(p => now - (p.updatedAt || 0) < PRESENCE_STALE_MS);
+  if (!friends.length){
+    friendsPanel.innerHTML = `
+      <div class="friends-title">FRIENDS LIVE</div>
+      <div class="friends-empty">Waiting for friends to join…</div>`;
+    return;
+  }
+  friendsPanel.innerHTML = `<div class="friends-title">FRIENDS LIVE</div>` + friends.map(p => {
+    const typed = (p.typed || "     ").padEnd(5, " ").slice(0, 5);
+    const locked = (p.locked || "00000").padEnd(5, "0").slice(0, 5);
+    const tiles = typed.split("").map((ch, i) => {
+      const isHint = locked[i] === "1";
+      const letter = ch.trim();
+      return `<span class="mini-tile${letter ? " filled" : ""}${isHint ? " hint" : ""}">${escapeHtml(letter)}</span>`;
+    }).join("");
+    return `<div class="friend-row">
+      <span class="friend-name">${escapeHtml(p.name || "—")}</span>
+      <span class="mini-tiles">${tiles}</span>
+    </div>`;
+  }).join("");
 }
 
 /* ---------- Word lists ---------- */
@@ -630,6 +714,7 @@ const WORD_LENGTH = 5;
 const MAX_GUESSES = 6;
 const HINT_COST = 150;
 const ROUND_WIN_POINTS = 500;
+const REVEAL_COST = 500;
 
 const state = {
   answer: "",
@@ -650,19 +735,7 @@ const state = {
 // above (see makeRoomHandle for its methods).
 let activeRoom = null;
 
-// The streak when the current round began. In a room, winning sets the
-// streak to this + 1 (rather than incrementing), so two players finishing
-// the same round can never double-count it.
-let streakAtRoundStart = 0;
 
-// Called whenever a streak update arrives from the room (host or peer).
-function onRoomStreakUpdate(roomStreak){
-  if (roomStreak > state.streak){
-    state.streak = roomStreak;
-    updateCounters();
-    showToast(`Synced to room streak: ${roomStreak}`);
-  }
-}
 
 /* ---------- DOM refs ---------- */
 
@@ -677,6 +750,10 @@ const pointsValueEl = document.getElementById("pointsValue");
 const restartBtn = document.getElementById("restartBtn");
 const subtitleText = document.getElementById("subtitleText");
 const hintBtn = document.getElementById("hintBtn");
+const revealBtn = document.getElementById("revealBtn");
+const friendsPanel = document.getElementById("friendsPanel");
+const roomCodeBig = document.getElementById("roomCodeBig");
+const roomCopyBtn = document.getElementById("roomCopyBtn");
 
 const nameOverlay = document.getElementById("nameOverlay");
 const nameInput = document.getElementById("nameInput");
@@ -805,23 +882,39 @@ function refreshRoomUI(){
   if (activeRoom){
     roomBtn.classList.add("in-room");
     roomLabel.textContent = `ROOM: ${activeRoom.code}`;
-    roomStatusText.textContent = `In room ${activeRoom.code} — share this code with friends`;
+    roomStatusText.textContent = "Your room code — share it with friends";
+    roomCodeBig.textContent = activeRoom.code;
+    roomCodeBig.style.display = "block";
+    roomCopyBtn.style.display = "block";
     roomJoinFields.style.display = "none";
     roomLeaveBtn.style.display = "block";
   } else {
     roomBtn.classList.remove("in-room");
     roomLabel.textContent = "PLAY WITH FRIENDS";
     roomStatusText.textContent = "Not in a room";
+    roomCodeBig.style.display = "none";
+    roomCopyBtn.style.display = "none";
     roomJoinFields.style.display = "block";
     roomLeaveBtn.style.display = "none";
   }
+  renderFriends();
+  updateCounters();
 }
 
 function leaveRoom(){
-  if (activeRoom) activeRoom.leave();
+  if (activeRoom){
+    clearMyPresence(activeRoom.code);
+    activeRoom.leave();
+  }
+  stopPresence();
   activeRoom = null;
   refreshRoomUI();
 }
+
+// Best-effort cleanup if the tab is closed while in a room.
+window.addEventListener("beforeunload", () => {
+  if (activeRoom) clearMyPresence(activeRoom.code);
+});
 
 roomBtn.addEventListener("click", () => {
   roomHint.textContent = "";
@@ -839,7 +932,7 @@ roomCreateBtn.addEventListener("click", async () => {
   try {
     const code = await createRoom();
     refreshRoomUI();
-    roomHint.textContent = `Room created! Code: ${code} — share it with friends.`;
+    roomHint.textContent = `Room created! Friends can join with code ${code}.`;
   } catch (e) {
     console.error("createRoom failed:", e);
     roomHint.textContent = "Couldn't create a room — check your connection.";
@@ -868,7 +961,18 @@ roomLeaveBtn.addEventListener("click", () => {
   roomHint.textContent = "Left the room.";
 });
 
+roomCopyBtn.addEventListener("click", async () => {
+  if (!activeRoom) return;
+  try {
+    await navigator.clipboard.writeText(activeRoom.code);
+    roomHint.textContent = "Room code copied!";
+  } catch (e) {
+    roomHint.textContent = "Couldn't copy — select the code and copy it manually.";
+  }
+});
+
 hintBtn.addEventListener("click", useHint);
+revealBtn.addEventListener("click", useReveal);
 
 /* ---------- Init ---------- */
 
@@ -885,8 +989,8 @@ function newRound(keepRoundNumber, forcedAnswer){
   state.locked = [false, false, false, false, false];
   state.gameOver = false;
   state.keyStatus = {};
-  streakAtRoundStart = state.streak;
   if (!keepRoundNumber) state.round += 1;
+  schedulePresence();
   renderBoard();
   renderKeyboard();
   updateCounters();
@@ -960,10 +1064,11 @@ function renderKeyboard(){
 
 function updateCounters(){
   roundValueEl.textContent = String(state.round).padStart(3, "0");
-  streakValueEl.textContent = String(state.streak);
+  streakValueEl.textContent = activeRoom ? "—" : String(state.streak);
   bestValueEl.textContent = String(state.best);
   pointsValueEl.textContent = String(state.points);
   hintBtn.disabled = state.points < HINT_COST || state.gameOver;
+  revealBtn.disabled = state.points < REVEAL_COST || state.gameOver;
 }
 
 function setMessage(html, kind){
@@ -1038,6 +1143,38 @@ function useHint(){
   }
 }
 
+// Ends the round by showing the answer. No points are awarded, and the
+// streak is left as it is. Called directly when the paying player clicks
+// the button, and for everyone else in a room when the live update arrives.
+function showRevealedAnswer(){
+  if (state.gameOver) return;
+  state.gameOver = true;
+  updateCounters();
+  setMessage(`THE ANSWER WAS <span class="answer-reveal">${state.answer.toUpperCase()}</span>`, "reveal");
+  const seqAtEnd = activeRoom ? activeRoom.getSeq() : null;
+  setTimeout(() => advanceRound(seqAtEnd, false), 5000);
+}
+
+function useReveal(){
+  if (state.gameOver){
+    showToast("No active round");
+    return;
+  }
+  if (state.points < REVEAL_COST){
+    showToast("Not enough points");
+    return;
+  }
+  const msg = activeRoom
+    ? `Reveal the answer for ${REVEAL_COST} points? This ends the round for everyone in the room, and no points are awarded.`
+    : `Reveal the answer for ${REVEAL_COST} points? No points are awarded for this round.`;
+  if (!confirm(msg)) return;
+
+  state.points -= REVEAL_COST;
+  if (state.playerName) spendPoints(state.playerName, state.points);
+  if (activeRoom) activeRoom.revealAnswer();
+  showRevealedAnswer();
+}
+
 function updateCurrentRow(){
   const r = state.guesses.length;
   const rowEl = document.getElementById(`row-${r}`);
@@ -1050,6 +1187,7 @@ function updateCurrentRow(){
     tile.classList.toggle("filled", Boolean(letter));
     tile.classList.toggle("hint", Boolean(state.locked[c]));
   }
+  schedulePresence();
 }
 
 function shakeRow(r){
@@ -1096,6 +1234,7 @@ function commitGuess(guess){
   state.results.push(result);
   state.slots = ["", "", "", "", ""];
   state.locked = [false, false, false, false, false];
+  schedulePresence();
 
   revealRow(r, guess, result, () => {
     result.forEach((status, i) => {
@@ -1112,16 +1251,14 @@ function commitGuess(guess){
 
     if (won){
       state.gameOver = true;
-      state.streak = activeRoom ? streakAtRoundStart + 1 : state.streak + 1;
-      state.best = Math.max(state.best, state.streak);
       state.points += ROUND_WIN_POINTS;
-      saveBest(state.best);
-      if (state.playerName){
-        submitScore(state.playerName, state.best);
-        awardPoints(state.playerName, ROUND_WIN_POINTS);
-      }
-      if (activeRoom){
-        activeRoom.pushStreak(state.streak);
+      if (state.playerName) awardPoints(state.playerName, ROUND_WIN_POINTS);
+      // Streaks are only counted in solo play, not inside rooms.
+      if (!activeRoom){
+        state.streak += 1;
+        state.best = Math.max(state.best, state.streak);
+        saveBest(state.best);
+        if (state.playerName) submitScore(state.playerName, state.best);
       }
       updateCounters();
       setMessage(`Solved in ${state.guesses.length}/${MAX_GUESSES} — +${ROUND_WIN_POINTS} points — next round starting…`, "win");
@@ -1129,9 +1266,8 @@ function commitGuess(guess){
       setTimeout(() => advanceRound(seqAtEnd, false), 1600);
     } else if (lost){
       state.gameOver = true;
-      state.streak = 0;
+      if (!activeRoom) state.streak = 0;
       state.round = 0;
-      if (activeRoom) activeRoom.resetStreak();
       updateCounters();
       setMessage(`THE ANSWER WAS <span class="answer-reveal">${state.answer.toUpperCase()}</span>`, "lose");
       const seqAtEnd = activeRoom ? activeRoom.getSeq() : null;

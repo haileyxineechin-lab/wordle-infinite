@@ -656,3 +656,110 @@ body{
     position: static;
   }
 }
+
+
+/* ---------- Action bar wrapping (3 buttons) ---------- */
+
+.action-bar{ flex-wrap: wrap; }
+.action-btn{ min-width: 140px; }
+
+.action-btn.in-room #roomLabel{
+  font-size: 15px;
+  letter-spacing: 0.14em;
+}
+
+/* ---------- Big room code (shown after creating/joining a room) ---------- */
+
+.room-code-big{
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 56px;
+  letter-spacing: 0.18em;
+  padding-left: 0.18em; /* balances the trailing letter-spacing so it looks centered */
+  color: var(--present);
+  background: var(--tile-idle);
+  border: 2px dashed var(--present);
+  border-radius: var(--radius);
+  padding-top: 14px;
+  padding-bottom: 14px;
+  margin: 4px 0 14px;
+  user-select: all;
+}
+
+@media (max-width: 400px){
+  .room-code-big{ font-size: 40px; }
+}
+
+/* ---------- Reveal message ---------- */
+
+.message-rail.reveal{ color: var(--present); }
+
+/* ---------- Friends live panel ---------- */
+
+.friends-panel{
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+.friends-title{
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--paper-dim);
+  margin-bottom: 8px;
+}
+
+.friends-empty{
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--paper-dim);
+}
+
+.friend-row{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.friend-name{
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--paper);
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-tiles{
+  display: flex;
+  gap: 4px;
+}
+
+.mini-tile{
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--tile-idle);
+  border: 1px solid var(--tile-border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--paper);
+  text-transform: uppercase;
+}
+
+.mini-tile.filled{ border-color: var(--tile-filled-border); }
+
+.mini-tile.hint{
+  border-color: var(--present);
+  color: var(--present);
+  box-shadow: 0 0 0 1px var(--present) inset;
+}
