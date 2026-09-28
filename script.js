@@ -7,8 +7,8 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
-  initializeFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, onSnapshot,
-  increment
+  initializeFirestore, doc, getDoc, setDoc, updateDoc, collection, query, orderBy, limit, onSnapshot,
+  increment, arrayUnion, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -131,19 +131,20 @@ function subscribeLeaderboard(limitCount, onUpdate, onError){
   }
 }
 
-/* ---------- Rooms (shared streak with friends — PeerJS, no backend needed) ---------- */
+/* ---------- Rooms (shared board with friends — Firestore) ---------- */
 //
-// This does NOT use Firebase at all. It uses PeerJS, a WebRTC library that
-// only needs its free public "broker" (peerjs.com's own hosted service,
-// no account/API key required by you or your players) to help two browsers
-// find each other; after that, streak updates travel directly
-// browser-to-browser. One player is the "host" (their peer ID *is* the
-// room code); everyone else connects to the host, and the host relays the
-// highest known streak to everyone. Because it's peer-to-peer, the host's
-// tab needs to stay open for the room to keep working.
+// A room is one Firestore document, rooms/{code}:
+//   { code, answer, round, seq, streak, guesses: [words], updatedAt }
+// Everyone in the room subscribes to that document live, so all players
+// see the same word, the same guesses, and the same streak. It runs over
+// normal HTTPS through Firebase, so it works on any network (unlike
+// peer-to-peer connections, which school/office networks often block),
+// and nobody has to keep a tab open for the room to stay alive.
+//
+// `seq` increments every time a new round starts. Any player's browser can
+// start the next round; a transaction makes sure only the first one wins.
 
 const ROOM_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
-const PEER_ID_PREFIX = "wordle-infinite-";
 
 function randomRoomCode(){
   let code = "";
@@ -153,201 +154,192 @@ function randomRoomCode(){
   return code;
 }
 
-const PEERJS_URLS = [
-  "https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js",
-  "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"
-];
-
-function loadScript(url){
-  return new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = url;
-    s.onload = () => resolve();
-    s.onerror = () => { s.remove(); reject(new Error("Failed to load " + url)); };
-    document.head.appendChild(s);
-  });
+function roomRef(code){
+  return doc(db, "rooms", code.toUpperCase());
 }
 
-// Loads PeerJS on demand (only when someone opens a room), trying each
-// CDN in turn. No <script> tag in index.html needed.
-async function ensurePeerJS(){
-  if (typeof Peer !== "undefined") return;
-  for (const url of PEERJS_URLS){
-    try {
-      await loadScript(url);
-      if (typeof Peer !== "undefined") return;
-    } catch (e) {
-      console.warn(e.message);
-    }
-  }
-  throw new Error("PeerJS failed to load from every CDN — check your connection or ad blocker");
-}
+// The seq of the round we're currently showing (null until first snapshot).
+let roomLastSeq = null;
 
-async function openPeer(desiredId){
-  await ensurePeerJS();
-  return new Promise((resolve, reject) => {
-    const peer = desiredId ? new Peer(desiredId) : new Peer();
-    const timeoutId = setTimeout(() => reject(new Error("Connection timed out")), 10000);
-    peer.on("open", () => { clearTimeout(timeoutId); resolve(peer); });
-    peer.on("error", (err) => { clearTimeout(timeoutId); reject(err); });
-  });
-}
+function makeRoomHandle(code, isHost){
+  const ref = roomRef(code);
+  let unsubscribe = null;
 
-// Becomes the host of a new room. Returns the room code.
-async function createRoomP2P(initialStreak){
-  const code = randomRoomCode();
-  const peer = await openPeer(PEER_ID_PREFIX + code);
+  const handle = {
+    code: code.toUpperCase(),
+    isHost,
+    knownStreak: 0,
 
-  let roomStreak = initialStreak;
-  const connections = [];
-
-  function broadcastStreak(value){
-    connections.forEach(c => { if (c.open) c.send({ type: "streak", value }); });
-  }
-
-  // Relay a guess to every connected peer except the one it came from
-  // (that peer already applied it locally for instant feedback).
-  function broadcastGuess(word, excludeConn){
-    connections.forEach(c => {
-      if (c !== excludeConn && c.open) c.send({ type: "guess", word });
-    });
-  }
-
-  function broadcastNewRound(answer, round){
-    connections.forEach(c => { if (c.open) c.send({ type: "newRound", answer, round }); });
-  }
-
-  peer.on("connection", (conn) => {
-    connections.push(conn);
-    conn.on("open", () => {
-      conn.send({ type: "streak", value: roomStreak });
-      // Catch the new player up on the round already in progress.
-      conn.send({
-        type: "roomState",
-        answer: state.answer,
-        round: state.round,
-        guesses: state.guesses,
-        gameOver: state.gameOver
-      });
-    });
-    conn.on("data", (msg) => {
-      if (!msg || typeof msg !== "object") return;
-      if (msg.type === "streak" && typeof msg.value === "number"){
-        if (msg.value > roomStreak){
-          roomStreak = msg.value;
-          broadcastStreak(roomStreak);
-          onRoomStreakUpdate(roomStreak);
-        }
-      } else if (msg.type === "guess" && typeof msg.word === "string"){
-        commitGuess(msg.word);
-        broadcastGuess(msg.word, conn);
-      }
-    });
-    conn.on("close", () => {
-      const i = connections.indexOf(conn);
-      if (i !== -1) connections.splice(i, 1);
-    });
-  });
-
-  activeRoom = {
-    code,
-    isHost: true,
-    peer,
+    // Raise the room's streak (never lowers it).
     pushStreak(streak){
-      if (streak > roomStreak){
-        roomStreak = streak;
-        broadcastStreak(roomStreak);
+      if (streak > handle.knownStreak){
+        handle.knownStreak = streak;
+        updateDoc(ref, { streak, updatedAt: Date.now() })
+          .catch(e => console.warn("pushStreak failed", e));
       }
     },
+
+    // A lost round resets the shared streak for everyone.
+    resetStreak(){
+      handle.knownStreak = 0;
+      updateDoc(ref, { streak: 0, updatedAt: Date.now() })
+        .catch(e => console.warn("resetStreak failed", e));
+    },
+
+    // Every guess (yours or a friend's) goes through the shared document;
+    // each browser applies it when the live update arrives.
     sendGuess(word){
-      // Host applies its own guesses locally (already done by the caller)
-      // and just needs to relay them out to everyone else.
-      broadcastGuess(word, null);
+      updateDoc(ref, { guesses: arrayUnion(word), updatedAt: Date.now() })
+        .catch(e => {
+          console.warn("sendGuess failed", e);
+          showToast("Couldn't send guess");
+        });
     },
-    startNextRound(){
+
+    // Starts the next shared round. Every browser tries this when a round
+    // ends; the seq check means only the first one actually takes effect.
+    async startNextRound(seqAtEnd, lost){
       const answer = pickAnswer();
-      newRound(false, answer);
-      broadcastNewRound(answer, state.round);
+      try {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists()) return;
+          const d = snap.data();
+          if (d.seq !== seqAtEnd) return; // someone else already advanced
+          tx.update(ref, {
+            answer,
+            round: lost ? 1 : (d.round || 0) + 1,
+            seq: d.seq + 1,
+            guesses: [],
+            streak: lost ? 0 : (d.streak || 0),
+            updatedAt: Date.now()
+          });
+        });
+      } catch (e) {
+        console.warn("startNextRound failed", e);
+      }
     },
-    restartRoom(){
-      state.round = 1;
-      state.streak = 0;
+
+    // Host-only manual restart (↺ button).
+    async restartRoom(){
       const answer = pickAnswer();
-      newRound(true, answer);
-      broadcastNewRound(answer, state.round);
+      try {
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref);
+          if (!snap.exists()) return;
+          const d = snap.data();
+          tx.update(ref, {
+            answer, round: 1, seq: d.seq + 1, guesses: [], streak: 0, updatedAt: Date.now()
+          });
+        });
+      } catch (e) {
+        console.warn("restartRoom failed", e);
+      }
     },
+
+    getSeq(){ return roomLastSeq; },
+
+    _subscribe(){
+      unsubscribe = onSnapshot(
+        ref,
+        (snap) => { if (snap.exists()) handleRoomSnapshot(handle, snap.data()); },
+        (err) => {
+          console.error("Room subscription error:", err);
+          showToast("Lost connection to the room");
+        }
+      );
+    },
+
     leave(){
-      connections.forEach(c => c.close());
-      peer.destroy();
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+      roomLastSeq = null;
     }
   };
 
+  return handle;
+}
+
+// Called on every live update of the room document.
+function handleRoomSnapshot(handle, data){
+  handle.knownStreak = data.streak || 0;
+
+  if (data.seq !== roomLastSeq){
+    // First update after joining, or a brand-new round started.
+    const isJoin = roomLastSeq === null;
+    roomLastSeq = data.seq;
+    applyRoomState(data, isJoin);
+  } else {
+    // Same round: show any guesses we haven't displayed yet.
+    const guesses = Array.isArray(data.guesses) ? data.guesses : [];
+    for (let i = state.guesses.length; i < guesses.length; i++){
+      if (state.guesses.length >= MAX_GUESSES || state.guesses.includes(state.answer)) break;
+      commitGuess(guesses[i]);
+    }
+    onRoomStreakUpdate(data.streak || 0);
+  }
+}
+
+// Sets up the shared round from the room document: the shared answer,
+// round number, and silently replays guesses already made (no animation,
+// no points — those were handled when they were first made).
+function applyRoomState(data, isJoin){
+  const guesses = Array.isArray(data.guesses) ? data.guesses : [];
+  state.round = data.round;
+  newRound(true, data.answer);
+  guesses.forEach(w => replayGuess(w));
+  state.gameOver = guesses.includes(data.answer) || guesses.length >= MAX_GUESSES;
+  // On join, keep our streak if it's higher; on a new shared round the
+  // room's streak is the source of truth.
+  state.streak = isJoin ? Math.max(state.streak, data.streak || 0) : (data.streak || 0);
+  streakAtRoundStart = state.streak;
+  renderBoard();
+  renderKeyboard();
+  updateCounters();
+}
+
+// Creates a new room from the round currently on screen. Returns the code.
+async function createRoom(){
+  if (!leaderboardEnabled) throw new Error("Firebase not initialized");
+  let code = null;
+  for (let i = 0; i < 5 && !code; i++){
+    const candidate = randomRoomCode();
+    const snap = await getDoc(roomRef(candidate));
+    if (!snap.exists()) code = candidate;
+  }
+  if (!code) throw new Error("Couldn't find a free room code");
+
+  await setDoc(roomRef(code), {
+    code,
+    answer: state.answer,
+    round: state.round,
+    seq: 1,
+    streak: state.streak,
+    guesses: state.guesses.slice(),
+    updatedAt: Date.now()
+  });
+
+  roomLastSeq = 1; // we're already on this round — don't reset our board
+  const handle = makeRoomHandle(code, true);
+  handle.knownStreak = state.streak;
+  activeRoom = handle;
+  handle._subscribe();
   return code;
 }
 
 // Joins an existing room by code.
-async function joinRoomP2P(code){
-  const peer = await openPeer();
-  const conn = peer.connect(PEER_ID_PREFIX + code.toUpperCase());
+async function joinRoom(code){
+  if (!leaderboardEnabled) throw new Error("Firebase not initialized");
+  const snap = await getDoc(roomRef(code));
+  if (!snap.exists()) throw new Error("No room found with that code");
 
-  await new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => reject(new Error("No room found with that code")), 10000);
-    conn.on("open", () => { clearTimeout(timeoutId); resolve(); });
-    conn.on("error", (err) => { clearTimeout(timeoutId); reject(err); });
-  });
-
-  conn.on("data", (msg) => {
-    if (!msg || typeof msg !== "object") return;
-    if (msg.type === "streak" && typeof msg.value === "number"){
-      onRoomStreakUpdate(msg.value);
-    } else if (msg.type === "guess" && typeof msg.word === "string"){
-      commitGuess(msg.word);
-    } else if (msg.type === "newRound" && typeof msg.answer === "string"){
-      state.round = msg.round;
-      newRound(true, msg.answer);
-    } else if (msg.type === "roomState" && typeof msg.answer === "string"){
-      applyRoomState(msg);
-    }
-  });
-  conn.on("close", () => {
-    showToast("Lost connection to the room's host.");
-  });
-
-  activeRoom = {
-    code: code.toUpperCase(),
-    isHost: false,
-    peer,
-    pushStreak(streak){
-      if (conn.open) conn.send({ type: "streak", value: streak });
-    },
-    sendGuess(word){
-      if (conn.open) conn.send({ type: "guess", word });
-    },
-    startNextRound(){
-      // Joiners never pick the word themselves — they wait for the
-      // host's "newRound" broadcast so everyone plays the same word.
-    },
-    leave(){
-      conn.close();
-      peer.destroy();
-    }
-  };
-
-  // Share our current streak immediately so the room reflects the higher of the two.
-  activeRoom.pushStreak(state.streak);
-}
-
-// Called on a fresh join, to catch up on a round already in progress:
-// sets the shared answer/round, then silently replays guesses already
-// submitted by others (no animation, no re-awarding of points/streak).
-function applyRoomState(msg){
-  state.round = msg.round;
-  newRound(true, msg.answer);
-  msg.guesses.forEach(word => replayGuess(word));
-  state.gameOver = !!msg.gameOver;
-  renderBoard();
-  renderKeyboard();
-  updateCounters();
+  roomLastSeq = null; // first snapshot will load the room's round
+  const handle = makeRoomHandle(code, false);
+  handle.knownStreak = snap.data().streak || 0;
+  activeRoom = handle;
+  handle._subscribe();
+  // If our own streak is higher than the room's, lift the room up to it.
+  handle.pushStreak(state.streak);
 }
 
 /* ---------- Word lists ---------- */
@@ -654,9 +646,14 @@ const state = {
   keyStatus: {}        // letter -> 'correct' | 'present' | 'absent'
 };
 
-// The active PeerJS room, or null when not in one. Set by createRoomP2P /
-// joinRoomP2P above. { code, isHost, peer, pushStreak(streak), leave() }
+// The active room, or null when not in one. Set by createRoom / joinRoom
+// above (see makeRoomHandle for its methods).
 let activeRoom = null;
+
+// The streak when the current round began. In a room, winning sets the
+// streak to this + 1 (rather than incrementing), so two players finishing
+// the same round can never double-count it.
+let streakAtRoundStart = 0;
 
 // Called whenever a streak update arrives from the room (host or peer).
 function onRoomStreakUpdate(roomStreak){
@@ -840,11 +837,11 @@ roomCloseBtn.addEventListener("click", () => {
 roomCreateBtn.addEventListener("click", async () => {
   roomHint.textContent = "Creating room…";
   try {
-    const code = await createRoomP2P(state.streak);
+    const code = await createRoom();
     refreshRoomUI();
-    roomHint.textContent = `Room created! Code: ${code} — keep this tab open while friends join.`;
+    roomHint.textContent = `Room created! Code: ${code} — share it with friends.`;
   } catch (e) {
-    console.error("createRoomP2P failed:", e);
+    console.error("createRoom failed:", e);
     roomHint.textContent = "Couldn't create a room — check your connection.";
   }
 });
@@ -857,12 +854,12 @@ roomJoinBtn.addEventListener("click", async () => {
   }
   roomHint.textContent = "Joining…";
   try {
-    await joinRoomP2P(code);
+    await joinRoom(code);
     refreshRoomUI();
     roomHint.textContent = `Joined room ${code}!`;
   } catch (e) {
-    console.error("joinRoomP2P failed:", e);
-    roomHint.textContent = "Couldn't join — check the code and that the host is still online.";
+    console.error("joinRoom failed:", e);
+    roomHint.textContent = "Couldn't join — check the room code and try again.";
   }
 });
 
@@ -888,6 +885,7 @@ function newRound(keepRoundNumber, forcedAnswer){
   state.locked = [false, false, false, false, false];
   state.gameOver = false;
   state.keyStatus = {};
+  streakAtRoundStart = state.streak;
   if (!keepRoundNumber) state.round += 1;
   renderBoard();
   renderKeyboard();
@@ -1079,12 +1077,12 @@ function submitGuess(){
     return;
   }
 
-  // Apply it to our own board immediately, then tell the room about it
-  // (if we're in one) so everyone else's board updates too.
-  commitGuess(guess);
-
   if (activeRoom){
+    // In a room, the guess goes through the shared document and shows up
+    // on every board (ours included) when the live update arrives.
     activeRoom.sendGuess(guess);
+  } else {
+    commitGuess(guess);
   }
 }
 
@@ -1114,7 +1112,7 @@ function commitGuess(guess){
 
     if (won){
       state.gameOver = true;
-      state.streak += 1;
+      state.streak = activeRoom ? streakAtRoundStart + 1 : state.streak + 1;
       state.best = Math.max(state.best, state.streak);
       state.points += ROUND_WIN_POINTS;
       saveBest(state.best);
@@ -1127,14 +1125,17 @@ function commitGuess(guess){
       }
       updateCounters();
       setMessage(`Solved in ${state.guesses.length}/${MAX_GUESSES} — +${ROUND_WIN_POINTS} points — next round starting…`, "win");
-      setTimeout(() => advanceRound(), 1600);
+      const seqAtEnd = activeRoom ? activeRoom.getSeq() : null;
+      setTimeout(() => advanceRound(seqAtEnd, false), 1600);
     } else if (lost){
       state.gameOver = true;
       state.streak = 0;
       state.round = 0;
+      if (activeRoom) activeRoom.resetStreak();
       updateCounters();
       setMessage(`THE ANSWER WAS <span class="answer-reveal">${state.answer.toUpperCase()}</span>`, "lose");
-      setTimeout(() => advanceRound(), 5000);
+      const seqAtEnd = activeRoom ? activeRoom.getSeq() : null;
+      setTimeout(() => advanceRound(seqAtEnd, true), 5000);
     } else {
       renderBoard();
     }
@@ -1145,9 +1146,9 @@ function commitGuess(guess){
 // In a room, only the host picks the next word (and broadcasts it) —
 // everyone else just waits for that broadcast so the whole room stays
 // on the same word.
-function advanceRound(){
+function advanceRound(seqAtEnd, lost){
   if (activeRoom){
-    activeRoom.startNextRound();
+    activeRoom.startNextRound(seqAtEnd, lost);
   } else {
     newRound(false);
   }
