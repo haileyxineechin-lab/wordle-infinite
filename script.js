@@ -328,42 +328,71 @@ async function joinRoom(code){
   updateCounters();
 }
 
-/* ---------- Live presence (see friends' typing and hints) ---------- */
+/* ---------- Live presence (everyone sees everyone's movement) ---------- */
 //
 // Each player writes one small document to "roomPlayers" describing what
-// they're currently typing and which letters came from hints. Everyone in
-// the room watches those documents, so you can see what your friends are
-// trying and avoid repeating the same guess.
+// they're currently typing, which letters came from hints, and their most
+// recent action. Everyone in the room watches all of those documents, so
+// every participant sees the same live roster plus an activity feed of
+// what people are doing (joining, hints, guesses, reveals, leaving).
 
 const PRESENCE_COLLECTION = "roomPlayers";
-const PRESENCE_STALE_MS = 3 * 60 * 1000;   // hide friends silent for 3 min
+const PRESENCE_STALE_MS = 3 * 60 * 1000;   // hide players silent for 3 min
 const PRESENCE_HEARTBEAT_MS = 60 * 1000;   // re-announce ourselves every minute
+const FEED_MAX = 6;
 
 let presenceUnsub = null;
 let presenceTimer = null;
 let presenceHeartbeat = null;
-let lastFriends = [];
+let lastPlayers = [];            // every player's presence doc (including ours)
+let activityFeed = [];           // newest first: { text, at }
+let pendingEvent = null;         // our latest action: { text, at }
+let seenEvents = {};             // player name -> eventAt we've already shown
+let presenceFirstSnapshot = true;
 
 function presenceDocRef(code){
   return doc(db, PRESENCE_COLLECTION, `${code.toUpperCase()}_${docIdFor(state.playerName || "player")}`);
 }
 
-// Debounced so fast typing doesn't spam the database.
+// Debounced so fast typing doesn't spam the database. Our own row on
+// screen updates instantly; friends see it about a fifth of a second later.
 function schedulePresence(){
   if (!activeRoom || !state.playerName) return;
+  renderFriends();
   clearTimeout(presenceTimer);
   presenceTimer = setTimeout(writePresence, 200);
 }
 
 function writePresence(){
   if (!activeRoom || !state.playerName || !leaderboardEnabled) return;
-  setDoc(presenceDocRef(activeRoom.code), {
+  const data = {
     room: activeRoom.code,
     name: state.playerName.slice(0, 16),
     typed: state.slots.map(s => s || " ").join(""),
     locked: state.locked.map(b => (b ? "1" : "0")).join(""),
     updatedAt: Date.now()
-  }).catch(e => console.warn("presence write failed", e));
+  };
+  if (pendingEvent){
+    data.event = pendingEvent.text.slice(0, 60);
+    data.eventAt = pendingEvent.at;
+  }
+  setDoc(presenceDocRef(activeRoom.code), data)
+    .catch(e => console.warn("presence write failed", e));
+}
+
+function pushFeed(text){
+  activityFeed.unshift({ text, at: Date.now() });
+  activityFeed = activityFeed.slice(0, FEED_MAX);
+  renderFriends();
+}
+
+// Tells everyone in the room what we just did, e.g. "used a hint".
+function announce(text){
+  if (!activeRoom) return;
+  pendingEvent = { text, at: Date.now() };
+  pushFeed(`You ${text}`);
+  clearTimeout(presenceTimer);
+  writePresence();
 }
 
 function startPresence(){
@@ -372,14 +401,30 @@ function startPresence(){
   const q = query(collection(db, PRESENCE_COLLECTION), where("room", "==", activeRoom.code));
   presenceUnsub = onSnapshot(q, (snap) => {
     const me = (state.playerName || "").toLowerCase();
-    lastFriends = snap.docs
-      .map(d => d.data())
-      .filter(p => (p.name || "").toLowerCase() !== me);
+    lastPlayers = snap.docs.map(d => d.data());
+
+    // Turn other players' changes into activity-feed entries.
+    snap.docChanges().forEach((ch) => {
+      const p = ch.doc.data();
+      const name = p.name || "Someone";
+      if (name.toLowerCase() === me) return;
+      if (ch.type === "removed"){
+        if (!presenceFirstSnapshot) pushFeed(`${name} left the room`);
+        delete seenEvents[name];
+        return;
+      }
+      if (p.eventAt && seenEvents[name] !== p.eventAt){
+        seenEvents[name] = p.eventAt;
+        // Events that already existed when we arrived aren't news.
+        if (!presenceFirstSnapshot) pushFeed(`${name} ${p.event}`);
+      }
+    });
+    presenceFirstSnapshot = false;
     renderFriends();
   }, (err) => console.warn("presence subscription error", err));
+
   presenceHeartbeat = setInterval(() => { renderFriends(); writePresence(); }, PRESENCE_HEARTBEAT_MS);
-  writePresence();
-  renderFriends();
+  announce("joined the room");
 }
 
 function stopPresence(){
@@ -388,7 +433,11 @@ function stopPresence(){
   if (presenceUnsub) presenceUnsub();
   presenceUnsub = null;
   presenceHeartbeat = null;
-  lastFriends = [];
+  lastPlayers = [];
+  activityFeed = [];
+  pendingEvent = null;
+  seenEvents = {};
+  presenceFirstSnapshot = true;
 }
 
 // Removes our presence document (called when leaving a room).
@@ -397,33 +446,54 @@ function clearMyPresence(code){
   deleteDoc(presenceDocRef(code)).catch(e => console.warn("presence delete failed", e));
 }
 
+function miniTilesHtml(typed, locked){
+  const t = (typed || "").padEnd(5, " ").slice(0, 5);
+  const l = (locked || "").padEnd(5, "0").slice(0, 5);
+  return t.split("").map((ch, i) => {
+    const letter = ch.trim();
+    const isHint = l[i] === "1";
+    return `<span class="mini-tile${letter ? " filled" : ""}${isHint ? " hint" : ""}">${escapeHtml(letter)}</span>`;
+  }).join("");
+}
+
 function renderFriends(){
   if (!activeRoom){
     friendsPanel.style.display = "none";
     return;
   }
   friendsPanel.style.display = "block";
+
+  const me = state.playerName || "You";
   const now = Date.now();
-  const friends = lastFriends.filter(p => now - (p.updatedAt || 0) < PRESENCE_STALE_MS);
-  if (!friends.length){
-    friendsPanel.innerHTML = `
-      <div class="friends-title">FRIENDS LIVE</div>
-      <div class="friends-empty">Waiting for friends to join…</div>`;
-    return;
+  const others = lastPlayers.filter(p =>
+    (p.name || "").toLowerCase() !== me.toLowerCase() &&
+    now - (p.updatedAt || 0) < PRESENCE_STALE_MS
+  );
+
+  // Our own row comes straight from the live board, so it never lags.
+  const rows = [
+    { name: me, isSelf: true,
+      typed: state.slots.map(s => s || " ").join(""),
+      locked: state.locked.map(b => (b ? "1" : "0")).join("") },
+    ...others
+  ];
+
+  let html = `<div class="friends-title">LIVE IN ROOM · ${rows.length} ${rows.length === 1 ? "PLAYER" : "PLAYERS"}</div>`;
+  html += rows.map(p => `
+    <div class="friend-row${p.isSelf ? " self" : ""}">
+      <span class="friend-name">${escapeHtml(p.name || "—")}${p.isSelf ? " (you)" : ""}</span>
+      <span class="mini-tiles">${miniTilesHtml(p.typed, p.locked)}</span>
+    </div>`).join("");
+
+  if (!others.length){
+    html += `<div class="friends-empty">Waiting for friends to join…</div>`;
   }
-  friendsPanel.innerHTML = `<div class="friends-title">FRIENDS LIVE</div>` + friends.map(p => {
-    const typed = (p.typed || "     ").padEnd(5, " ").slice(0, 5);
-    const locked = (p.locked || "00000").padEnd(5, "0").slice(0, 5);
-    const tiles = typed.split("").map((ch, i) => {
-      const isHint = locked[i] === "1";
-      const letter = ch.trim();
-      return `<span class="mini-tile${letter ? " filled" : ""}${isHint ? " hint" : ""}">${escapeHtml(letter)}</span>`;
-    }).join("");
-    return `<div class="friend-row">
-      <span class="friend-name">${escapeHtml(p.name || "—")}</span>
-      <span class="mini-tiles">${tiles}</span>
-    </div>`;
-  }).join("");
+  if (activityFeed.length){
+    html += `<div class="friends-feed">` +
+      activityFeed.map(e => `<div class="feed-item">${escapeHtml(e.text)}</div>`).join("") +
+      `</div>`;
+  }
+  friendsPanel.innerHTML = html;
 }
 
 /* ---------- Word lists ---------- */
@@ -1135,6 +1205,7 @@ function useHint(){
   const idx = remaining[Math.floor(Math.random() * remaining.length)];
   state.slots[idx] = state.answer[idx];
   state.locked[idx] = true;
+  if (activeRoom) announce("used a hint");
   state.points -= HINT_COST;
   updateCounters();
   updateCurrentRow();
@@ -1171,7 +1242,10 @@ function useReveal(){
 
   state.points -= REVEAL_COST;
   if (state.playerName) spendPoints(state.playerName, state.points);
-  if (activeRoom) activeRoom.revealAnswer();
+  if (activeRoom){
+    activeRoom.revealAnswer();
+    announce("revealed the answer");
+  }
   showRevealedAnswer();
 }
 
@@ -1219,6 +1293,7 @@ function submitGuess(){
     // In a room, the guess goes through the shared document and shows up
     // on every board (ours included) when the live update arrives.
     activeRoom.sendGuess(guess);
+    announce(`guessed ${guess.toUpperCase()}`);
   } else {
     commitGuess(guess);
   }

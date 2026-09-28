@@ -763,3 +763,27 @@ body{
   color: var(--present);
   box-shadow: 0 0 0 1px var(--present) inset;
 }
+
+
+/* ---------- Friends panel: own row + activity feed ---------- */
+
+.friend-row.self .friend-name{ color: var(--present); }
+
+.friends-empty{ margin-top: 6px; }
+
+.friends-feed{
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-edge);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.feed-item{
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--paper-dim);
+}
+
+.feed-item:first-child{ color: var(--paper); }
