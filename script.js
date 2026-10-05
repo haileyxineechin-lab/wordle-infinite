@@ -333,22 +333,16 @@ async function joinRoom(code){
 // Each player writes one small document to "roomPlayers" describing what
 // they're currently typing, which letters came from hints, and their most
 // recent action. Everyone in the room watches all of those documents, so
-// every participant sees the same live roster plus an activity feed of
-// what people are doing (joining, hints, guesses, reveals, leaving).
+// every participant sees the same live roster.
 
 const PRESENCE_COLLECTION = "roomPlayers";
 const PRESENCE_STALE_MS = 3 * 60 * 1000;   // hide players silent for 3 min
 const PRESENCE_HEARTBEAT_MS = 60 * 1000;   // re-announce ourselves every minute
-const FEED_MAX = 6;
 
 let presenceUnsub = null;
 let presenceTimer = null;
 let presenceHeartbeat = null;
 let lastPlayers = [];            // every player's presence doc (including ours)
-let activityFeed = [];           // newest first: { text, at }
-let pendingEvent = null;         // our latest action: { text, at }
-let seenEvents = {};             // player name -> eventAt we've already shown
-let presenceFirstSnapshot = true;
 
 function presenceDocRef(code){
   return doc(db, PRESENCE_COLLECTION, `${code.toUpperCase()}_${docIdFor(state.playerName || "player")}`);
@@ -372,27 +366,8 @@ function writePresence(){
     locked: state.locked.map(b => (b ? "1" : "0")).join(""),
     updatedAt: Date.now()
   };
-  if (pendingEvent){
-    data.event = pendingEvent.text.slice(0, 60);
-    data.eventAt = pendingEvent.at;
-  }
   setDoc(presenceDocRef(activeRoom.code), data)
     .catch(e => console.warn("presence write failed", e));
-}
-
-function pushFeed(text){
-  activityFeed.unshift({ text, at: Date.now() });
-  activityFeed = activityFeed.slice(0, FEED_MAX);
-  renderFriends();
-}
-
-// Tells everyone in the room what we just did, e.g. "used a hint".
-function announce(text){
-  if (!activeRoom) return;
-  pendingEvent = { text, at: Date.now() };
-  pushFeed(`You ${text}`);
-  clearTimeout(presenceTimer);
-  writePresence();
 }
 
 function startPresence(){
@@ -403,28 +378,11 @@ function startPresence(){
     const me = (state.playerName || "").toLowerCase();
     lastPlayers = snap.docs.map(d => d.data());
 
-    // Turn other players' changes into activity-feed entries.
-    snap.docChanges().forEach((ch) => {
-      const p = ch.doc.data();
-      const name = p.name || "Someone";
-      if (name.toLowerCase() === me) return;
-      if (ch.type === "removed"){
-        if (!presenceFirstSnapshot) pushFeed(`${name} left the room`);
-        delete seenEvents[name];
-        return;
-      }
-      if (p.eventAt && seenEvents[name] !== p.eventAt){
-        seenEvents[name] = p.eventAt;
-        // Events that already existed when we arrived aren't news.
-        if (!presenceFirstSnapshot) pushFeed(`${name} ${p.event}`);
-      }
-    });
-    presenceFirstSnapshot = false;
     renderFriends();
   }, (err) => console.warn("presence subscription error", err));
 
   presenceHeartbeat = setInterval(() => { renderFriends(); writePresence(); }, PRESENCE_HEARTBEAT_MS);
-  announce("joined the room");
+  writePresence();
 }
 
 function stopPresence(){
@@ -434,10 +392,6 @@ function stopPresence(){
   presenceUnsub = null;
   presenceHeartbeat = null;
   lastPlayers = [];
-  activityFeed = [];
-  pendingEvent = null;
-  seenEvents = {};
-  presenceFirstSnapshot = true;
 }
 
 // Removes our presence document (called when leaving a room).
@@ -487,11 +441,6 @@ function renderFriends(){
 
   if (!others.length){
     html += `<div class="friends-empty">Waiting for friends to join…</div>`;
-  }
-  if (activityFeed.length){
-    html += `<div class="friends-feed">` +
-      activityFeed.map(e => `<div class="feed-item">${escapeHtml(e.text)}</div>`).join("") +
-      `</div>`;
   }
   friendsPanel.innerHTML = html;
 }
@@ -1159,6 +1108,7 @@ function handleKey(key){
   if (state.gameOver) return;
   if (nameOverlay.classList.contains("show")) return;
   if (roomOverlay.classList.contains("show")) return;
+  if (themeOverlay.classList.contains("show")) return;
 
   if (key === "back"){
     for (let i = WORD_LENGTH - 1; i >= 0; i--){
@@ -1205,7 +1155,6 @@ function useHint(){
   const idx = remaining[Math.floor(Math.random() * remaining.length)];
   state.slots[idx] = state.answer[idx];
   state.locked[idx] = true;
-  if (activeRoom) announce("used a hint");
   state.points -= HINT_COST;
   updateCounters();
   updateCurrentRow();
@@ -1244,7 +1193,6 @@ function useReveal(){
   if (state.playerName) spendPoints(state.playerName, state.points);
   if (activeRoom){
     activeRoom.revealAnswer();
-    announce("revealed the answer");
   }
   showRevealedAnswer();
 }
@@ -1293,7 +1241,6 @@ function submitGuess(){
     // In a room, the guess goes through the shared document and shows up
     // on every board (ours included) when the live update arrives.
     activeRoom.sendGuess(guess);
-    announce(`guessed ${guess.toUpperCase()}`);
   } else {
     commitGuess(guess);
   }
@@ -1428,6 +1375,256 @@ document.addEventListener("keydown", (e) => {
 });
 
 restartBtn.addEventListener("click", resetSession);
+
+
+/* ---------- Theme (background + font colours) ---------- */
+
+const THEME_KEY = "wordleInfiniteTheme";
+const MAX_STOPS = 3;
+
+const DEFAULT_THEME = {
+  bg:   { stops: ["#1c2128", "#14171c"], angle: 160, shape: "radial" },
+  text: { auto: true, stops: ["#f2efe9"], angle: 90 }
+};
+
+const THEME_PRESETS = [
+  { name: "Default",  bg: { stops: ["#1c2128", "#14171c"], angle: 160, shape: "radial" }, text: { auto: true, stops: ["#f2efe9"], angle: 90 } },
+  { name: "Sunset",   bg: { stops: ["#ff7e5f", "#feb47b", "#7f53ac"], angle: 135, shape: "linear" }, text: { auto: false, stops: ["#ffffff"], angle: 90 } },
+  { name: "Ocean",    bg: { stops: ["#0f2027", "#203a43", "#2c5364"], angle: 160, shape: "linear" }, text: { auto: false, stops: ["#a8edea", "#fed6e3"], angle: 90 } },
+  { name: "Neon",     bg: { stops: ["#0b0b1a"], angle: 90, shape: "linear" }, text: { auto: false, stops: ["#00f5d4", "#f15bb5", "#fee440"], angle: 90 } },
+  { name: "Paper",    bg: { stops: ["#f4efe6"], angle: 90, shape: "linear" }, text: { auto: false, stops: ["#2b2a28"], angle: 90 } },
+  { name: "Forest",   bg: { stops: ["#134e5e", "#71b280"], angle: 150, shape: "linear" }, text: { auto: false, stops: ["#fdfbf3"], angle: 90 } },
+  { name: "Berry",    bg: { stops: ["#42275a", "#734b6d"], angle: 135, shape: "linear" }, text: { auto: false, stops: ["#ffd6e8", "#fff2a8"], angle: 90 } }
+];
+
+const themeBtn = document.getElementById("themeBtn");
+const themeOverlay = document.getElementById("themeOverlay");
+const themePresetsEl = document.getElementById("themePresets");
+const themePreviewEl = document.getElementById("themePreview");
+const themePreviewTextEl = document.getElementById("themePreviewText");
+const themeCloseBtn = document.getElementById("themeCloseBtn");
+const themeResetBtn = document.getElementById("themeResetBtn");
+const bgStopsEl = document.getElementById("bgStops");
+const bgAngleRow = document.getElementById("bgAngleRow");
+const bgAngleInput = document.getElementById("bgAngle");
+const bgShapeSel = document.getElementById("bgShape");
+const textAutoInput = document.getElementById("textAuto");
+const textStopsWrap = document.getElementById("textStopsWrap");
+const textStopsEl = document.getElementById("textStops");
+const textAngleRow = document.getElementById("textAngleRow");
+const textAngleInput = document.getElementById("textAngle");
+
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const isHex = (v) => typeof v === "string" && /^#[0-9a-f]{6}$/i.test(v);
+
+function sanitizeTheme(t){
+  const out = clone(DEFAULT_THEME);
+  if (!t || typeof t !== "object") return out;
+  const cleanStops = (arr, fallback) => {
+    const list = Array.isArray(arr) ? arr.filter(isHex).slice(0, MAX_STOPS) : [];
+    return list.length ? list : fallback;
+  };
+  if (t.bg){
+    out.bg.stops = cleanStops(t.bg.stops, out.bg.stops);
+    out.bg.angle = Number.isFinite(+t.bg.angle) ? Math.max(0, Math.min(360, +t.bg.angle)) : out.bg.angle;
+    out.bg.shape = t.bg.shape === "radial" ? "radial" : "linear";
+  }
+  if (t.text){
+    out.text.auto = Boolean(t.text.auto);
+    out.text.stops = cleanStops(t.text.stops, out.text.stops);
+    out.text.angle = Number.isFinite(+t.text.angle) ? Math.max(0, Math.min(360, +t.text.angle)) : out.text.angle;
+  }
+  return out;
+}
+
+function loadTheme(){
+  try {
+    const raw = localStorage.getItem(THEME_KEY);
+    return raw ? sanitizeTheme(JSON.parse(raw)) : clone(DEFAULT_THEME);
+  } catch (e){
+    return clone(DEFAULT_THEME);
+  }
+}
+
+function saveTheme(){
+  try { localStorage.setItem(THEME_KEY, JSON.stringify(theme)); } catch (e) { /* ignore */ }
+}
+
+let theme = loadTheme();
+
+function hexLuminance(hex){
+  const n = parseInt(hex.slice(1), 16);
+  const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+}
+
+function gradientCss(cfg){
+  const stops = cfg.stops;
+  if (stops.length === 1) return `linear-gradient(${stops[0]}, ${stops[0]})`;
+  const list = stops.join(", ");
+  return cfg.shape === "radial"
+    ? `radial-gradient(circle at 50% 0%, ${list})`
+    : `linear-gradient(${cfg.angle}deg, ${list})`;
+}
+
+function applyTheme(){
+  const root = document.documentElement;
+  const bgStops = theme.bg.stops;
+  const avgLum = bgStops.reduce((sum, c) => sum + hexLuminance(c), 0) / bgStops.length;
+  const lightSurface = avgLum > 0.4;
+
+  root.dataset.surface = lightSurface ? "light" : "dark";
+  root.style.setProperty("--page-bg", gradientCss(theme.bg));
+
+  let paper;
+  let gradientText = false;
+  if (theme.text.auto){
+    paper = lightSurface ? "#1a1d22" : "#f2efe9";
+  } else {
+    paper = theme.text.stops[0];
+    gradientText = theme.text.stops.length > 1;
+  }
+  root.style.setProperty("--paper", paper);
+  root.style.setProperty("--paper-dim", `color-mix(in srgb, ${paper} 68%, transparent)`);
+  root.style.setProperty("--text-gradient",
+    gradientText ? gradientCss({ stops: theme.text.stops, angle: theme.text.angle, shape: "linear" }) : "none");
+  root.classList.toggle("text-gradient", gradientText);
+
+  // Live preview swatch inside the theme panel.
+  themePreviewEl.style.backgroundImage = gradientCss(theme.bg);
+  if (gradientText){
+    themePreviewTextEl.style.backgroundImage = gradientCss({ stops: theme.text.stops, angle: theme.text.angle, shape: "linear" });
+    themePreviewTextEl.style.webkitBackgroundClip = "text";
+    themePreviewTextEl.style.backgroundClip = "text";
+    themePreviewTextEl.style.color = "transparent";
+  } else {
+    themePreviewTextEl.style.backgroundImage = "none";
+    themePreviewTextEl.style.color = paper;
+  }
+}
+
+function renderStopEditor(container, stops, onChange, minCount){
+  container.innerHTML = "";
+  stops.forEach((color, i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "stop";
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = color;
+    input.setAttribute("aria-label", `Colour ${i + 1}`);
+    input.addEventListener("input", () => {
+      stops[i] = input.value;
+      onChange(false);
+    });
+    wrap.appendChild(input);
+    if (stops.length > minCount){
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "stop-remove";
+      rm.textContent = "×";
+      rm.title = "Remove colour";
+      rm.setAttribute("aria-label", `Remove colour ${i + 1}`);
+      rm.addEventListener("click", () => { stops.splice(i, 1); onChange(true); });
+      wrap.appendChild(rm);
+    }
+    container.appendChild(wrap);
+  });
+  if (stops.length < MAX_STOPS){
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "stop-add";
+    add.textContent = "+";
+    add.title = "Add colour (makes a gradient)";
+    add.setAttribute("aria-label", "Add colour");
+    add.addEventListener("click", () => {
+      const last = stops[stops.length - 1];
+      stops.push(last);
+      onChange(true);
+    });
+    container.appendChild(add);
+  }
+}
+
+function syncThemeUI(rebuildStops){
+  if (rebuildStops){
+    renderStopEditor(bgStopsEl, theme.bg.stops, syncThemeUI, 1);
+    renderStopEditor(textStopsEl, theme.text.stops, syncThemeUI, 1);
+  }
+  const bgGradient = theme.bg.stops.length > 1;
+  bgAngleRow.style.display = bgGradient ? "flex" : "none";
+  bgAngleInput.disabled = theme.bg.shape === "radial";
+  bgAngleInput.value = theme.bg.angle;
+  bgShapeSel.value = theme.bg.shape;
+
+  textAutoInput.checked = theme.text.auto;
+  textStopsWrap.style.display = theme.text.auto ? "none" : "block";
+  textAngleRow.style.display = (!theme.text.auto && theme.text.stops.length > 1) ? "flex" : "none";
+  textAngleInput.value = theme.text.angle;
+
+  applyTheme();
+  saveTheme();
+}
+
+function renderPresets(){
+  themePresetsEl.innerHTML = "";
+  THEME_PRESETS.forEach((p) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "preset";
+    b.title = p.name;
+    b.style.background = gradientCss(p.bg);
+    const label = document.createElement("span");
+    label.textContent = "Aa";
+    const textCss = p.text.auto ? "#f2efe9" : p.text.stops.join(", ");
+    if (!p.text.auto && p.text.stops.length > 1){
+      label.style.backgroundImage = `linear-gradient(90deg, ${textCss})`;
+      label.style.webkitBackgroundClip = "text";
+      label.style.backgroundClip = "text";
+      label.style.color = "transparent";
+    } else {
+      label.style.color = p.text.auto ? "#f2efe9" : p.text.stops[0];
+    }
+    b.appendChild(label);
+    const name = document.createElement("small");
+    name.textContent = p.name;
+    const presetLum = p.bg.stops.reduce((sum, col) => sum + hexLuminance(col), 0) / p.bg.stops.length;
+    name.style.color = presetLum > 0.4 ? "#2b2a28" : "#ffffff";
+    b.appendChild(name);
+    b.addEventListener("click", () => {
+      theme = sanitizeTheme(p);
+      syncThemeUI(true);
+    });
+    themePresetsEl.appendChild(b);
+  });
+}
+
+function openThemeOverlay(){
+  syncThemeUI(true);
+  themeOverlay.classList.add("show");
+}
+
+function closeThemeOverlay(){
+  themeOverlay.classList.remove("show");
+}
+
+themeBtn.addEventListener("click", openThemeOverlay);
+themeCloseBtn.addEventListener("click", closeThemeOverlay);
+themeOverlay.addEventListener("click", (e) => { if (e.target === themeOverlay) closeThemeOverlay(); });
+themeOverlay.addEventListener("keydown", (e) => {
+  e.stopPropagation();
+  if (e.key === "Escape") closeThemeOverlay();
+});
+themeResetBtn.addEventListener("click", () => {
+  theme = clone(DEFAULT_THEME);
+  syncThemeUI(true);
+});
+bgAngleInput.addEventListener("input", () => { theme.bg.angle = +bgAngleInput.value; syncThemeUI(false); });
+bgShapeSel.addEventListener("change", () => { theme.bg.shape = bgShapeSel.value; syncThemeUI(false); });
+textAutoInput.addEventListener("change", () => { theme.text.auto = textAutoInput.checked; syncThemeUI(false); });
+textAngleInput.addEventListener("input", () => { theme.text.angle = +textAngleInput.value; syncThemeUI(false); });
+
+renderPresets();
+applyTheme();
 
 /* ---------- Boot ---------- */
 

@@ -13,6 +13,23 @@
 
 <div class="app-layout">
 
+  <!-- Leaderboard: always visible, updates live from Firestore -->
+  <aside id="leaderboardPanel" class="leaderboard-panel">
+    <div class="leaderboard-header">
+      <span>LIVE LEADERBOARD</span>
+      <span class="leaderboard-dot" id="leaderboardDot" title="Connection status"></span>
+    </div>
+    <div class="leaderboard-col-header">
+      <span class="lb-rank">#</span>
+      <span class="lb-name">NAME</span>
+      <span class="lb-score">STREAK</span>
+      <span class="lb-points">POINTS</span>
+    </div>
+    <ol id="leaderboardList" class="leaderboard-list">
+      <li class="leaderboard-empty">Loading…</li>
+    </ol>
+  </aside>
+
   <div class="board-frame" id="boardFrame">
 
     <header class="depboard">
@@ -51,6 +68,9 @@
       <button id="roomBtn" class="action-btn">
         👥 <span id="roomLabel">PLAY WITH FRIENDS</span>
       </button>
+      <button id="themeBtn" class="action-btn" title="Change background and font colours">
+        🎨 THEME
+      </button>
     </div>
 
     <!-- Live view of friends' typing/hints while in a room -->
@@ -67,23 +87,6 @@
     </footer>
 
   </div>
-
-  <!-- Leaderboard: always visible, updates live from Firestore -->
-  <aside id="leaderboardPanel" class="leaderboard-panel">
-    <div class="leaderboard-header">
-      <span>LIVE LEADERBOARD</span>
-      <span class="leaderboard-dot" id="leaderboardDot" title="Connection status"></span>
-    </div>
-    <div class="leaderboard-col-header">
-      <span class="lb-rank">#</span>
-      <span class="lb-name">NAME</span>
-      <span class="lb-score">STREAK</span>
-      <span class="lb-points">POINTS</span>
-    </div>
-    <ol id="leaderboardList" class="leaderboard-list">
-      <li class="leaderboard-empty">Loading…</li>
-    </ol>
-  </aside>
 
 </div>
 
@@ -117,6 +120,50 @@
 
     <p class="overlay-hint" id="roomHint"></p>
     <button id="roomCloseBtn" class="overlay-btn overlay-btn-secondary">CLOSE</button>
+  </div>
+</div>
+
+<!-- Theme overlay: background + font colours (single, mixed or gradient) -->
+<div id="themeOverlay" class="overlay">
+  <div class="overlay-card theme-card">
+    <h2 class="overlay-title">THEME <span class="title-slash">//</span> COLOURS</h2>
+    <p class="overlay-sub">Pick one colour, or add up to three to mix a gradient</p>
+
+    <div class="theme-section">
+      <div class="theme-label">PRESETS</div>
+      <div id="themePresets" class="theme-presets"></div>
+    </div>
+
+    <div class="theme-section">
+      <div class="theme-label">BACKGROUND</div>
+      <div id="bgStops" class="stops"></div>
+      <div id="bgAngleRow" class="theme-row">
+        <select id="bgShape" class="theme-select" aria-label="Gradient type">
+          <option value="linear">LINEAR</option>
+          <option value="radial">RADIAL</option>
+        </select>
+        <input id="bgAngle" class="theme-range" type="range" min="0" max="360" step="5" aria-label="Gradient angle">
+      </div>
+    </div>
+
+    <div class="theme-section">
+      <div class="theme-label">FONT</div>
+      <label class="theme-check"><input type="checkbox" id="textAuto"> AUTO (match background)</label>
+      <div id="textStopsWrap">
+        <div id="textStops" class="stops"></div>
+      </div>
+      <div id="textAngleRow" class="theme-row">
+        <span class="theme-row-label">ANGLE</span>
+        <input id="textAngle" class="theme-range" type="range" min="0" max="360" step="5" aria-label="Font gradient angle">
+      </div>
+    </div>
+
+    <div id="themePreview" class="theme-preview"><span id="themePreviewText">WORDLE // INFINITE</span></div>
+
+    <div class="theme-actions">
+      <button id="themeResetBtn" class="overlay-btn overlay-btn-secondary">RESET</button>
+      <button id="themeCloseBtn" class="overlay-btn">DONE</button>
+    </div>
   </div>
 </div>
 
