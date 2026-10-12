@@ -58,12 +58,21 @@
       </div>
     </header>
 
+    <div class="length-bar">
+      <span class="length-label">WORD LENGTH</span>
+      <div id="lengthPicker" class="length-picker" role="group" aria-label="Word length">
+        <button type="button" data-len="4" title="4-letter words">4</button>
+        <button type="button" data-len="5" title="5-letter words">5</button>
+        <button type="button" data-len="6" title="6-letter words">6</button>
+      </div>
+    </div>
+
     <div class="action-bar">
       <button id="hintBtn" class="action-btn" title="Reveal one correct letter for 150 points">
         💡 HINT <span class="action-btn-cost">150 pts</span>
       </button>
       <button id="revealBtn" class="action-btn" title="Reveal the answer and skip to the next round (no points awarded)">
-        🔓 REVEAL <span class="action-btn-cost">500 pts</span>
+        🔓 REVEAL <span class="action-btn-cost" id="revealCost">500 pts</span>
       </button>
       <button id="roomBtn" class="action-btn">
         👥 <span id="roomLabel">PLAY WITH FRIENDS</span>
@@ -127,7 +136,7 @@
 <div id="themeOverlay" class="overlay">
   <div class="overlay-card theme-card">
     <h2 class="overlay-title">THEME <span class="title-slash">//</span> COLOURS</h2>
-    <p class="overlay-sub">Pick one colour, or add up to three to mix a gradient</p>
+    <p class="overlay-sub">Pick one colour, or add up to five to mix a gradient</p>
 
     <div class="theme-section">
       <div class="theme-label">PRESETS</div>
@@ -137,6 +146,7 @@
     <div class="theme-section">
       <div class="theme-label">BACKGROUND</div>
       <div id="bgStops" class="stops"></div>
+      <div id="bgSwatches" class="swatches" aria-label="Quick colours"></div>
       <div id="bgAngleRow" class="theme-row">
         <select id="bgShape" class="theme-select" aria-label="Gradient type">
           <option value="linear">LINEAR</option>
@@ -151,6 +161,7 @@
       <label class="theme-check"><input type="checkbox" id="textAuto"> AUTO (match background)</label>
       <div id="textStopsWrap">
         <div id="textStops" class="stops"></div>
+        <div id="textSwatches" class="swatches" aria-label="Quick colours"></div>
       </div>
       <div id="textAngleRow" class="theme-row">
         <span class="theme-row-label">ANGLE</span>
@@ -158,7 +169,24 @@
       </div>
     </div>
 
-    <div id="themePreview" class="theme-preview"><span id="themePreviewText">WORDLE // INFINITE</span></div>
+    <div class="theme-section">
+      <div class="theme-label">GAME COLOURS</div>
+      <div class="game-colors">
+        <label class="gc"><input type="color" id="accentColor" value="#c9a227"><span>ACCENT</span></label>
+        <label class="gc"><input type="color" id="tileCorrect" value="#5c8f6b"><span>CORRECT</span></label>
+        <label class="gc"><input type="color" id="tilePresent" value="#c9a227"><span>PRESENT</span></label>
+        <label class="gc"><input type="color" id="tileAbsent" value="#34383f"><span>ABSENT</span></label>
+      </div>
+      <button type="button" id="gameColorsReset" class="link-btn">Reset game colours</button>
+    </div>
+
+    <div id="themePreview" class="theme-preview">
+      <span id="themePreviewText">WORDLE // INFINITE</span>
+      <div class="pv-row">
+        <span class="pv-tile pv-c">C</span><span class="pv-tile pv-p">P</span><span class="pv-tile pv-a">A</span>
+        <span class="pv-chip">ACCENT</span>
+      </div>
+    </div>
 
     <div class="theme-actions">
       <button id="themeResetBtn" class="overlay-btn overlay-btn-secondary">RESET</button>
