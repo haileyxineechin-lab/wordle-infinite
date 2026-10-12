@@ -135,9 +135,18 @@
     <button id="roomCopyBtn" class="overlay-btn overlay-btn-secondary" style="display:none;">COPY CODE</button>
 
     <div id="roomJoinFields">
+      <div class="room-mode">
+        <div class="theme-label">CREATE A ROOM &middot; PICK THE MODE</div>
+        <div id="roomModes" class="start-modes" role="group" aria-label="Room word length">
+          <button type="button" data-len="4"><b>4</b><small>QUICK</small></button>
+          <button type="button" data-len="5"><b>5</b><small>CLASSIC</small></button>
+          <button type="button" data-len="6"><b>6</b><small>HARD</small></button>
+        </div>
+        <button id="roomCreateBtn" class="overlay-btn">CREATE ROOM</button>
+      </div>
+      <div class="room-or"><span>OR JOIN A FRIEND</span></div>
       <input id="roomCodeInput" class="overlay-input" type="text" maxlength="5" placeholder="ROOM CODE" autocomplete="off">
-      <button id="roomJoinBtn" class="overlay-btn">JOIN ROOM</button>
-      <button id="roomCreateBtn" class="overlay-btn overlay-btn-secondary">CREATE NEW ROOM</button>
+      <button id="roomJoinBtn" class="overlay-btn overlay-btn-secondary">JOIN ROOM</button>
     </div>
 
     <button id="roomLeaveBtn" class="overlay-btn overlay-btn-danger" style="display:none;">LEAVE ROOM</button>

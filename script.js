@@ -286,17 +286,32 @@ function applyRoomState(data){
 }
 
 // Creates a new room from the round currently on screen. Returns the code.
+// Firestore can hang forever when it can't reach the server, so give up after a while.
+function withTimeout(promise, ms = 10000){
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error("timed out"), { code: "timeout" })), ms))
+  ]);
+}
+
+function describeRoomError(e){
+  const code = e && e.code ? String(e.code) : "";
+  if (code.includes("permission")) return "Firestore blocked it (permission-denied). The security rules must allow the \"rooms\" and \"roomPlayers\" collections.";
+  if (code === "timeout" || code.includes("unavailable")) return "Couldn't reach the server. Check your connection and try again.";
+  return `${code || (e && e.message) || "unknown error"}`;
+}
+
 async function createRoom(){
   if (!leaderboardEnabled) throw new Error("Firebase not initialized");
   let code = null;
   for (let i = 0; i < 5 && !code; i++){
     const candidate = randomRoomCode();
-    const snap = await getDoc(roomRef(candidate));
+    const snap = await withTimeout(getDoc(roomRef(candidate)));
     if (!snap.exists()) code = candidate;
   }
   if (!code) throw new Error("Couldn't find a free room code");
 
-  await setDoc(roomRef(code), {
+  await withTimeout(setDoc(roomRef(code), {
     code,
     answer: state.answer,
     round: state.round,
@@ -305,7 +320,7 @@ async function createRoom(){
     revealedBy: "",
     guesses: state.guesses.slice(),
     updatedAt: Date.now()
-  });
+  }));
 
   roomLastSeq = 1; // we're already on this round — don't reset our board
   const handle = makeRoomHandle(code, true);
@@ -319,7 +334,7 @@ async function createRoom(){
 // Joins an existing room by code.
 async function joinRoom(code){
   if (!leaderboardEnabled) throw new Error("Firebase not initialized");
-  const snap = await getDoc(roomRef(code));
+  const snap = await withTimeout(getDoc(roomRef(code)));
   if (!snap.exists()) throw new Error("No room found with that code");
 
   roomLastSeq = null; // first snapshot will load the room's round
@@ -685,7 +700,7 @@ function refreshRoomUI(){
   if (activeRoom){
     roomBtn.classList.add("in-room");
     roomLabel.textContent = `ROOM: ${activeRoom.code}`;
-    roomStatusText.textContent = "Your room code — share it with friends";
+    roomStatusText.textContent = `${WORD_LENGTH}-letter room — share the code with friends`;
     roomCodeBig.textContent = activeRoom.code;
     roomCodeBig.style.display = "block";
     roomCopyBtn.style.display = "block";
@@ -723,6 +738,8 @@ window.addEventListener("beforeunload", () => {
 roomBtn.addEventListener("click", () => {
   roomHint.textContent = "";
   roomCodeInput.value = "";
+  roomModeChoice = WORD_LENGTH;
+  refreshRoomModes();
   refreshRoomUI();
   roomOverlay.classList.add("show");
 });
@@ -731,15 +748,44 @@ roomCloseBtn.addEventListener("click", () => {
   roomOverlay.classList.remove("show");
 });
 
+// The mode (word length) the host picks for a new room.
+let roomModeChoice = WORD_LENGTH;
+const roomModes = document.getElementById("roomModes");
+
+function refreshRoomModes(){
+  roomModes.querySelectorAll("button").forEach((b) => {
+    const on = Number(b.dataset.len) === roomModeChoice;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+roomModes.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-len]");
+  if (!btn) return;
+  roomModeChoice = Number(btn.dataset.len);
+  refreshRoomModes();
+});
+
 roomCreateBtn.addEventListener("click", async () => {
+  roomCreateBtn.disabled = true;
   roomHint.textContent = "Creating room…";
+  const prevLength = WORD_LENGTH;
   try {
+    // A new room starts fresh in the chosen mode.
+    if (roomModeChoice !== WORD_LENGTH){
+      setWordLength(roomModeChoice);
+      newRound(true);
+    }
     const code = await createRoom();
     refreshRoomUI();
-    roomHint.textContent = `Room created! Friends can join with code ${code}.`;
+    roomHint.textContent = `Room created (${roomModeChoice}-letter mode)! Friends can join with code ${code}.`;
   } catch (e) {
     console.error("createRoom failed:", e);
-    roomHint.textContent = "Couldn't create a room — check your connection.";
+    if (prevLength !== WORD_LENGTH){ setWordLength(prevLength); newRound(true); }
+    roomHint.textContent = `Couldn't create a room: ${describeRoomError(e)}`;
+  } finally {
+    roomCreateBtn.disabled = false;
   }
 });
 
@@ -753,10 +799,12 @@ roomJoinBtn.addEventListener("click", async () => {
   try {
     await joinRoom(code);
     refreshRoomUI();
-    roomHint.textContent = `Joined room ${code}!`;
+    roomHint.textContent = `Joined room ${code} (${WORD_LENGTH}-letter mode)!`;
   } catch (e) {
     console.error("joinRoom failed:", e);
-    roomHint.textContent = "Couldn't join — check the room code and try again.";
+    roomHint.textContent = e && e.message === "No room found with that code"
+      ? "No room found with that code."
+      : `Couldn't join: ${describeRoomError(e)}`;
   }
 });
 

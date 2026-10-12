@@ -1285,3 +1285,41 @@ body{
 .mood.active{ border-color: #ffffff; box-shadow: 0 0 0 2px var(--accent); }
 
 #nameOverlay .overlay-btn{ margin-top: 18px; }
+
+
+/* ---------- Room overlay: mode + create ---------- */
+
+.room-mode{ text-align: left; }
+.room-mode .overlay-btn{ margin-top: 14px; }
+
+.room-or{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--paper-dim);
+}
+
+.room-or::before, .room-or::after{
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--tile-border);
+}
+
+#roomOverlay .overlay-card{
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.overlay-btn:disabled{ opacity: 0.6; cursor: wait; }
+
+.overlay-card .overlay-btn-secondary{
+  background: var(--tile-idle);
+  color: var(--paper);
+  border: 1px solid var(--tile-border);
+}
+.overlay-card .overlay-btn-secondary:hover:not(:disabled){ border-color: var(--paper-dim); }
