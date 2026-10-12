@@ -7,7 +7,7 @@
 <link rel="icon" type="image/png" href="word.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 
@@ -59,7 +59,7 @@
     </header>
 
     <div class="length-bar">
-      <span class="length-label">WORD LENGTH</span>
+      <span class="length-label">MODE <em>letters per word</em></span>
       <div id="lengthPicker" class="length-picker" role="group" aria-label="Word length">
         <button type="button" data-len="4" title="4-letter words">4</button>
         <button type="button" data-len="5" title="5-letter words">5</button>
@@ -105,6 +105,21 @@
     <h2 class="overlay-title">WORDLE <span class="title-slash">//</span> INFINITE</h2>
     <p class="overlay-sub">Enter a name to join the leaderboard</p>
     <input id="nameInput" class="overlay-input" type="text" maxlength="16" placeholder="YOUR NAME" autocomplete="off">
+
+    <div class="start-section">
+      <div class="theme-label">1 &middot; CHOOSE YOUR MODE</div>
+      <div id="startModes" class="start-modes" role="group" aria-label="Word length">
+        <button type="button" data-len="4"><b>4</b><small>QUICK</small></button>
+        <button type="button" data-len="5"><b>5</b><small>CLASSIC</small></button>
+        <button type="button" data-len="6"><b>6</b><small>HARD</small></button>
+      </div>
+    </div>
+
+    <div class="start-section">
+      <div class="theme-label">2 &middot; CHOOSE YOUR MOOD</div>
+      <div id="startMoods" class="start-moods"></div>
+    </div>
+
     <button id="nameSubmitBtn" class="overlay-btn">START</button>
     <p class="overlay-hint" id="nameHint"></p>
   </div>
@@ -197,6 +212,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script type="module" src="script.js"></script>
+<script type="module" src="script.js?v=3"></script>
 </body>
 </html>

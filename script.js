@@ -5,7 +5,7 @@
 
 /* ---------- Firebase / leaderboard (Firestore) ---------- */
 
-import { ANSWERS as ANSWER_WORDS_RAW, EXTRA as EXTRA_WORDS_RAW } from "./words.js";
+import { ANSWERS as ANSWER_WORDS_RAW, EXTRA as EXTRA_WORDS_RAW } from "./words.js?v=3";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.1/firebase-app.js";
 import {
   initializeFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, query, where, orderBy, limit, onSnapshot,
@@ -788,7 +788,7 @@ function pickAnswer(len = WORD_LENGTH){
 /* ---------- Word length picker ---------- */
 
 function refreshLengthPicker(){
-  lengthPicker.querySelectorAll("button").forEach((b) => {
+  document.querySelectorAll("#lengthPicker button, #startModes button").forEach((b) => {
     const on = Number(b.dataset.len) === WORD_LENGTH;
     b.classList.toggle("active", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
@@ -1551,6 +1551,38 @@ renderPresets();
 renderSwatches(bgSwatchesEl, bgStopsEl, () => theme.bg.stops);
 renderSwatches(textSwatchesEl, textStopsEl, () => theme.text.stops);
 applyTheme();
+
+/* ---------- Start screen: mode + mood ---------- */
+
+const startModes = document.getElementById("startModes");
+const startMoods = document.getElementById("startMoods");
+
+startModes.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-len]");
+  if (btn) setWordLength(Number(btn.dataset.len));
+});
+
+function renderMoods(){
+  startMoods.innerHTML = "";
+  THEME_PRESETS.forEach((p) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "mood";
+    b.title = p.name;
+    b.style.background = gradientCss(p.bg);
+    const lum = p.bg.stops.reduce((sum, c) => sum + hexLuminance(c), 0) / p.bg.stops.length;
+    b.style.color = lum > 0.4 ? "#2b2a28" : "#ffffff";
+    b.textContent = p.name;
+    b.addEventListener("click", () => {
+      theme = sanitizeTheme(p);
+      syncThemeUI(true);
+      startMoods.querySelectorAll(".mood").forEach((m) => m.classList.toggle("active", m === b));
+    });
+    startMoods.appendChild(b);
+  });
+}
+
+renderMoods();
 
 /* ---------- Boot ---------- */
 
