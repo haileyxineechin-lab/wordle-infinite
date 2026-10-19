@@ -1,114 +1,226 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stress Buster</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WORDLE // INFINITE</title>
+<link rel="icon" type="image/png" href="word.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
-  <div class="app">
-    <header class="top">
-      <h1>Stress Buster</h1>
-      <p class="lede">Add a face, pick a move, let it out.</p>
+
+<div class="app-layout">
+
+  <!-- Leaderboard: always visible, updates live from Firestore -->
+  <aside id="leaderboardPanel" class="leaderboard-panel">
+    <div class="leaderboard-header">
+      <span>LIVE LEADERBOARD</span>
+      <span class="leaderboard-dot" id="leaderboardDot" title="Connection status"></span>
+    </div>
+    <div class="leaderboard-col-header">
+      <span class="lb-rank">#</span>
+      <span class="lb-name">NAME</span>
+      <span class="lb-score">STREAK</span>
+      <span class="lb-points">POINTS</span>
+    </div>
+    <ol id="leaderboardList" class="leaderboard-list">
+      <li class="leaderboard-empty">Loading…</li>
+    </ol>
+  </aside>
+
+  <div class="board-frame" id="boardFrame">
+
+    <header class="depboard">
+      <div class="depboard-left">
+        <h1 class="title">WORDLE <span class="title-slash">//</span> INFINITE</h1>
+        <p class="subtitle" id="subtitleText">split-flap word engine</p>
+      </div>
+      <div class="depboard-right">
+        <div class="counter" id="roundCounter">
+          <span class="counter-label">ROUND</span>
+          <span class="counter-value" id="roundValue">001</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">STREAK</span>
+          <span class="counter-value" id="streakValue">0</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">BEST</span>
+          <span class="counter-value" id="bestValue">0</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">POINTS</span>
+          <span class="counter-value" id="pointsValue">0</span>
+        </div>
+        <button id="restartBtn" class="icon-btn" title="Reset session" aria-label="Reset session">↺</button>
+      </div>
     </header>
 
-    <main class="layout">
-      <section class="play">
-        <div class="meters">
-          <div class="meter">
-            <div class="meter-head">
-              <span>Stress</span>
-              <strong id="stressValue">100%</strong>
-            </div>
-            <div class="bar" role="progressbar" aria-label="Stress level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
-              <div class="bar-fill" id="stressFill"></div>
-            </div>
-          </div>
-          <div class="counters">
-            <div><span class="k">Hits</span><strong id="hitCount">0</strong></div>
-            <div><span class="k">Combo</span><strong id="comboCount">0</strong></div>
-          </div>
-        </div>
+    <div class="length-bar">
+      <span class="length-label">MODE <em>letters per word</em></span>
+      <div id="lengthPicker" class="length-picker" role="group" aria-label="Word length">
+        <button type="button" data-len="4" title="4-letter words">4</button>
+        <button type="button" data-len="5" title="5-letter words">5</button>
+        <button type="button" data-len="6" title="6-letter words">6</button>
+      </div>
+    </div>
 
-        <div class="stage" id="stage" role="group" aria-label="Play area">
-          <div class="ground" aria-hidden="true"></div>
+    <div class="action-bar">
+      <button id="hintBtn" class="action-btn" title="Reveal one correct letter for 150 points">
+        💡 HINT <span class="action-btn-cost">150 pts</span>
+      </button>
+      <button id="revealBtn" class="action-btn" title="Reveal the answer and skip to the next round (no points awarded)">
+        🔓 REVEAL <span class="action-btn-cost" id="revealCost">500 pts</span>
+      </button>
+      <button id="roomBtn" class="action-btn">
+        👥 <span id="roomLabel">PLAY WITH FRIENDS</span>
+      </button>
+      <button id="themeBtn" class="action-btn" title="Change background and font colours">
+        🎨 THEME
+      </button>
+    </div>
 
-          <div class="slot">
-            <div class="avatar-wrap" id="avatarWrap" tabindex="0" role="button"
-                 aria-label="Character. Press Space or Enter to use the selected move.">
-              <div class="avatar" id="avatar">
-                <div class="avatar-face" id="avatarFace"></div>
-                <div class="splats" id="splats"></div>
-              </div>
-              <div class="dizzy" id="dizzy" aria-hidden="true"></div>
-              <div class="nameplate" id="nameplate" hidden></div>
-            </div>
-          </div>
+    <!-- Live view of friends' typing/hints while in a room -->
+    <div id="friendsPanel" class="friends-panel" style="display:none;"></div>
 
-          <canvas id="fx" aria-hidden="true"></canvas>
-          <div id="floaters" aria-hidden="true"></div>
+    <div class="message-rail" id="messageRail" aria-live="polite"></div>
 
-          <div class="drop-hint" aria-hidden="true">Drop a picture to use it as the face</div>
-          <div class="toast" id="toast" role="status" aria-live="polite"></div>
-        </div>
-
-        <div class="tools" id="tools" role="group" aria-label="Choose a move"></div>
-      </section>
-
-      <aside class="panel">
-        <div>
-          <h2>Your character</h2>
-          <p>Pick a character, give it a name, attach a photo, or mix them: a name works with a character or a photo.</p>
-        </div>
-
-        <div class="group">
-          <span class="group-title" id="charsTitle">Choose a character</span>
-          <div class="chars" id="chars" role="group" aria-labelledby="charsTitle"></div>
-        </div>
-
-        <label class="field">Name (optional)
-          <input type="text" id="avatarName" maxlength="24" placeholder="Give it a name" autocomplete="off">
-        </label>
-
-        <div class="group">
-          <input class="file-input" type="file" id="photoInput" accept="image/*">
-          <label class="btn" for="photoInput">Attach a photo</label>
-          <button type="button" class="btn secondary" id="removePhoto" hidden>Remove my photo</button>
-        </div>
-
-        <details class="adjust" id="adjust" hidden>
-          <summary>Adjust photo</summary>
-          <label class="slider">Zoom
-            <input type="range" id="zoom" min="1" max="3" step="0.01" value="1">
-          </label>
-          <label class="slider">Move left or right
-            <input type="range" id="panX" min="-40" max="40" step="1" value="0">
-          </label>
-          <label class="slider">Move up or down
-            <input type="range" id="panY" min="-40" max="40" step="1" value="0">
-          </label>
-        </details>
-
-        <div class="checks">
-          <label class="check"><input type="checkbox" id="soundToggle" checked> Sound effects</label>
-          <label class="check" id="hapticLabel"><input type="checkbox" id="hapticToggle" checked> Vibration</label>
-        </div>
-
-        <div class="row">
-          <button type="button" class="btn secondary" id="wipeBtn">Wipe off the mess</button>
-          <button type="button" class="btn secondary" id="resetBtn">Start over</button>
-        </div>
-
-        <p class="fine">Photos stay on this device. Nothing is uploaded.</p>
-      </aside>
+    <main class="board-wrap">
+      <div id="board" class="board"></div>
     </main>
+
+    <footer class="keyboard-wrap">
+      <div id="keyboard" class="keyboard"></div>
+    </footer>
+
   </div>
 
+</div>
 
-  <script src="script.js"></script>
+<!-- Name entry overlay: shown before the first round -->
+<div id="nameOverlay" class="overlay">
+  <div class="overlay-card">
+    <h2 class="overlay-title">WORDLE <span class="title-slash">//</span> INFINITE</h2>
+    <p class="overlay-sub">Enter a name to join the leaderboard</p>
+    <input id="nameInput" class="overlay-input" type="text" maxlength="16" placeholder="YOUR NAME" autocomplete="off">
+
+    <div class="start-section">
+      <div class="theme-label">1 &middot; CHOOSE YOUR MODE</div>
+      <div id="startModes" class="start-modes" role="group" aria-label="Word length">
+        <button type="button" data-len="4"><b>4</b><small>QUICK</small></button>
+        <button type="button" data-len="5"><b>5</b><small>CLASSIC</small></button>
+        <button type="button" data-len="6"><b>6</b><small>HARD</small></button>
+      </div>
+    </div>
+
+    <div class="start-section">
+      <div class="theme-label">2 &middot; CHOOSE YOUR MOOD</div>
+      <div id="startMoods" class="start-moods"></div>
+    </div>
+
+    <button id="nameSubmitBtn" class="overlay-btn">START</button>
+    <p class="overlay-hint" id="nameHint"></p>
+  </div>
+</div>
+
+<!-- Room overlay: create or join a shared-streak room with friends -->
+<div id="roomOverlay" class="overlay">
+  <div class="overlay-card">
+    <h2 class="overlay-title">PLAY <span class="title-slash">//</span> TOGETHER</h2>
+    <p class="overlay-sub" id="roomStatusText">Not in a room</p>
+
+    <div id="roomCodeBig" class="room-code-big" style="display:none;"></div>
+    <button id="roomCopyBtn" class="overlay-btn overlay-btn-secondary" style="display:none;">COPY CODE</button>
+
+    <div id="roomJoinFields">
+      <div class="room-mode">
+        <div class="theme-label">CREATE A ROOM &middot; PICK THE MODE</div>
+        <div id="roomModes" class="start-modes" role="group" aria-label="Room word length">
+          <button type="button" data-len="4"><b>4</b><small>QUICK</small></button>
+          <button type="button" data-len="5"><b>5</b><small>CLASSIC</small></button>
+          <button type="button" data-len="6"><b>6</b><small>HARD</small></button>
+        </div>
+        <button id="roomCreateBtn" class="overlay-btn">CREATE ROOM</button>
+      </div>
+      <div class="room-or"><span>OR JOIN A FRIEND</span></div>
+      <input id="roomCodeInput" class="overlay-input" type="text" maxlength="5" placeholder="ROOM CODE" autocomplete="off">
+      <button id="roomJoinBtn" class="overlay-btn overlay-btn-secondary">JOIN ROOM</button>
+    </div>
+
+    <button id="roomLeaveBtn" class="overlay-btn overlay-btn-danger" style="display:none;">LEAVE ROOM</button>
+
+    <p class="overlay-hint" id="roomHint"></p>
+    <button id="roomCloseBtn" class="overlay-btn overlay-btn-secondary">CLOSE</button>
+  </div>
+</div>
+
+<!-- Theme overlay: background + font colours (single, mixed or gradient) -->
+<div id="themeOverlay" class="overlay">
+  <div class="overlay-card theme-card">
+    <h2 class="overlay-title">THEME <span class="title-slash">//</span> COLOURS</h2>
+    <p class="overlay-sub">Pick one colour, or add up to five to mix a gradient</p>
+
+    <div class="theme-section">
+      <div class="theme-label">PRESETS</div>
+      <div id="themePresets" class="theme-presets"></div>
+    </div>
+
+    <div class="theme-section">
+      <div class="theme-label">BACKGROUND</div>
+      <div id="bgStops" class="stops"></div>
+      <div id="bgSwatches" class="swatches" aria-label="Quick colours"></div>
+      <div id="bgAngleRow" class="theme-row">
+        <select id="bgShape" class="theme-select" aria-label="Gradient type">
+          <option value="linear">LINEAR</option>
+          <option value="radial">RADIAL</option>
+        </select>
+        <input id="bgAngle" class="theme-range" type="range" min="0" max="360" step="5" aria-label="Gradient angle">
+      </div>
+    </div>
+
+    <div class="theme-section">
+      <div class="theme-label">FONT</div>
+      <label class="theme-check"><input type="checkbox" id="textAuto"> AUTO (match background)</label>
+      <div id="textStopsWrap">
+        <div id="textStops" class="stops"></div>
+        <div id="textSwatches" class="swatches" aria-label="Quick colours"></div>
+      </div>
+      <div id="textAngleRow" class="theme-row">
+        <span class="theme-row-label">ANGLE</span>
+        <input id="textAngle" class="theme-range" type="range" min="0" max="360" step="5" aria-label="Font gradient angle">
+      </div>
+    </div>
+
+    <div class="theme-section">
+      <div class="theme-label">GAME COLOURS</div>
+      <div class="game-colors">
+        <label class="gc"><input type="color" id="accentColor" value="#c9a227"><span>ACCENT</span></label>
+        <label class="gc"><input type="color" id="tileCorrect" value="#5c8f6b"><span>CORRECT</span></label>
+        <label class="gc"><input type="color" id="tilePresent" value="#c9a227"><span>PRESENT</span></label>
+        <label class="gc"><input type="color" id="tileAbsent" value="#34383f"><span>ABSENT</span></label>
+      </div>
+      <button type="button" id="gameColorsReset" class="link-btn">Reset game colours</button>
+    </div>
+
+    <div id="themePreview" class="theme-preview">
+      <span id="themePreviewText">WORDLE // INFINITE</span>
+      <div class="pv-row">
+        <span class="pv-tile pv-c">C</span><span class="pv-tile pv-p">P</span><span class="pv-tile pv-a">A</span>
+        <span class="pv-chip">ACCENT</span>
+      </div>
+    </div>
+
+    <div class="theme-actions">
+      <button id="themeResetBtn" class="overlay-btn overlay-btn-secondary">RESET</button>
+      <button id="themeCloseBtn" class="overlay-btn">DONE</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script type="module" src="script.js?v=3"></script>
 </body>
 </html>
