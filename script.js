@@ -479,18 +479,24 @@ LENGTHS.forEach((n) => {
 const BEST_KEY = "wordleInfiniteBest";
 const NAME_KEY = "wordleInfiniteName";
 
-function loadBest(){
+// The best streak is remembered per account, so switching to another
+// name never inherits the previous player's record.
+const bestKeyFor = (name) => `${BEST_KEY}:${docIdFor(name || "")}`;
+
+function loadBest(name){
+  if (!name) return 0;
   try{
-    const saved = localStorage.getItem(BEST_KEY);
+    const saved = localStorage.getItem(bestKeyFor(name));
     return saved ? parseInt(saved, 10) || 0 : 0;
   } catch (e){
     return 0;
   }
 }
 
-function saveBest(value){
+function saveBest(value, name = state.playerName){
+  if (!name) return;
   try{
-    localStorage.setItem(BEST_KEY, String(value));
+    localStorage.setItem(bestKeyFor(name), String(value));
   } catch (e){
     // storage unavailable (e.g. private browsing) — best just won't persist
   }
@@ -536,7 +542,7 @@ const state = {
   answer: "",
   round: 1,
   streak: 0,
-  best: loadBest(),
+  best: loadBest(loadName()),
   points: 0,
   playerName: loadName(),
   guesses: [],        // array of submitted guesses
@@ -608,7 +614,22 @@ async function startWithName(name){
     nameHint.textContent = "Please enter a name.";
     return;
   }
+  // Re-entering the same name just closes the window; the game carries on.
+  if (state.playerName && docIdFor(state.playerName) === docIdFor(trimmed) && state.answer){
+    state.playerName = trimmed;
+    saveName(trimmed);
+    subtitleText.textContent = `playing as ${trimmed}`;
+    nameOverlay.classList.remove("show");
+    return;
+  }
+  // A different account always starts from a clean slate (streak 0),
+  // even on the same device and whatever mode (word length) it plays in.
+  if (activeRoom) leaveRoom();
   state.playerName = trimmed;
+  state.streak = 0;
+  state.round = 1;
+  state.points = 0;
+  state.best = loadBest(trimmed);
   saveName(trimmed);
   subtitleText.textContent = `playing as ${trimmed}`;
   nameOverlay.classList.remove("show");
@@ -616,11 +637,21 @@ async function startWithName(name){
   updateCounters();
 
   const cloudData = await loadPlayerData(trimmed);
+  // Ignore a late reply if the player already switched to another name.
+  if (state.playerName !== trimmed) return;
   state.best = Math.max(state.best, cloudData.best);
   state.points = cloudData.points;
-  saveBest(state.best);
+  saveBest(state.best, trimmed);
   updateCounters();
 }
+
+const switchBtn = document.getElementById("switchBtn");
+switchBtn.addEventListener("click", () => {
+  nameInput.value = "";
+  nameHint.textContent = "Enter another name to switch player (streak starts at 0).";
+  nameOverlay.classList.add("show");
+  nameInput.focus();
+});
 
 nameSubmitBtn.addEventListener("click", () => startWithName(nameInput.value));
 nameInput.addEventListener("keydown", (e) => {
