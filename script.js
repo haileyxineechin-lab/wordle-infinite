@@ -1706,6 +1706,51 @@ renderSwatches(bgSwatchesEl, bgStopsEl, () => theme.bg.stops);
 renderSwatches(textSwatchesEl, textStopsEl, () => theme.text.stops);
 applyTheme();
 
+/* ---------- View: 2D classic or 3D ---------- */
+
+const VIEW_KEY = "wordleInfiniteView";
+const viewBtn = document.getElementById("viewBtn");
+const startViews = document.getElementById("startViews");
+const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+let viewMode = document.documentElement.dataset.view === "3d" ? "3d" : "2d";
+
+function setView(v, { save = true } = {}){
+  viewMode = v === "3d" ? "3d" : "2d";
+  document.documentElement.dataset.view = viewMode;
+  if (save){
+    try { localStorage.setItem(VIEW_KEY, viewMode); } catch (e) { /* ignore */ }
+  }
+  startViews.querySelectorAll("button").forEach((b) => {
+    const on = b.dataset.view === viewMode;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  // The button shows what you would switch to.
+  viewBtn.textContent = viewMode === "3d" ? "2D" : "3D";
+  viewBtn.title = viewMode === "3d" ? "Switch to the classic 2D view" : "Switch to the 3D view";
+  if (viewMode === "2d"){
+    boardEl.style.removeProperty("--tilt-x");
+    boardEl.style.removeProperty("--tilt-y");
+  }
+}
+
+startViews.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-view]");
+  if (btn) setView(btn.dataset.view);
+});
+viewBtn.addEventListener("click", () => setView(viewMode === "3d" ? "2d" : "3d"));
+
+// 3D board follows the pointer a little, like looking around a table.
+document.addEventListener("pointermove", (e) => {
+  if (viewMode !== "3d" || reduceMotion) return;
+  const x = e.clientX / window.innerWidth - 0.5;
+  const y = e.clientY / window.innerHeight - 0.5;
+  boardEl.style.setProperty("--tilt-y", `${(x * 20).toFixed(1)}deg`);
+  boardEl.style.setProperty("--tilt-x", `${(16 - y * 12).toFixed(1)}deg`);
+});
+
+setView(viewMode, { save: false });
+
 /* ---------- Start screen: mode + mood ---------- */
 
 const startModes = document.getElementById("startModes");

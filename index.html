@@ -7,7 +7,8 @@
 <link rel="icon" type="image/png" href="word.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=3">
+<script>try{document.documentElement.dataset.view=localStorage.getItem("wordleInfiniteView")==="3d"?"3d":"2d"}catch(e){document.documentElement.dataset.view="2d"}</script>
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -54,6 +55,7 @@
           <span class="counter-label">POINTS</span>
           <span class="counter-value" id="pointsValue">0</span>
         </div>
+        <button id="viewBtn" class="icon-btn" title="Switch between 2D and 3D view" aria-label="Switch between 2D and 3D view">3D</button>
         <button id="switchBtn" class="icon-btn" title="Switch player" aria-label="Switch player">👤</button>
         <button id="restartBtn" class="icon-btn" title="Reset session" aria-label="Reset session">↺</button>
       </div>
@@ -117,7 +119,15 @@
     </div>
 
     <div class="start-section">
-      <div class="theme-label">2 &middot; CHOOSE YOUR MOOD</div>
+      <div class="theme-label">2 &middot; CHOOSE YOUR VIEW</div>
+      <div id="startViews" class="start-modes two" role="group" aria-label="Game view">
+        <button type="button" data-view="2d"><b>2D</b><small>CLASSIC</small></button>
+        <button type="button" data-view="3d"><b class="is3d">3D</b><small>DEPTH</small></button>
+      </div>
+    </div>
+
+    <div class="start-section">
+      <div class="theme-label">3 &middot; CHOOSE YOUR MOOD</div>
       <div id="startMoods" class="start-moods"></div>
     </div>
 
@@ -222,6 +232,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script type="module" src="script.js?v=3"></script>
+<script type="module" src="script.js?v=4"></script>
 </body>
 </html>

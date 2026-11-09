@@ -1345,3 +1345,208 @@ body{
   from{ transform: scale(1); }
   to{ transform: scale(1.06); }
 }
+
+
+/* ======================================================================
+   3D VIEW  (html[data-view="3d"])  — same game, real depth
+   ====================================================================== */
+
+.start-modes.two{ grid-template-columns: repeat(2, 1fr); }
+
+.start-modes b.is3d{
+  text-shadow: 1px 1px 0 rgba(0,0,0,.55), 2px 2px 0 rgba(0,0,0,.5), 3px 3px 0 rgba(0,0,0,.45), 4px 4px 0 rgba(0,0,0,.4);
+  transform: translate(-2px, -2px);
+}
+
+#viewBtn{
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+html[data-view="3d"]{ --grid-line: color-mix(in srgb, var(--paper) 16%, transparent); }
+
+html[data-view="3d"] .app-layout{ position: relative; z-index: 1; }
+
+/* perspective floor grid */
+html[data-view="3d"] body::before{
+  content: "";
+  position: fixed;
+  left: -25%;
+  right: -25%;
+  bottom: 0;
+  height: 55vh;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 52px 52px;
+  transform: perspective(520px) rotateX(62deg);
+  transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, #000, transparent 85%);
+  mask-image: linear-gradient(to top, #000, transparent 85%);
+}
+
+/* the board is a tilted slab of cubes */
+html[data-view="3d"] .board-wrap{
+  perspective: 1100px;
+  perspective-origin: 50% 25%;
+  padding: 6px 0 14px;
+}
+
+html[data-view="3d"] .board{
+  --tilt-x: 16deg;
+  --tilt-y: 0deg;
+  gap: 9px;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+  transition: transform 0.15s ease-out;
+}
+
+html[data-view="3d"] .board-row{ gap: 9px; transform-style: preserve-3d; }
+
+html[data-view="3d"] .tile{
+  --d: 14px;
+  perspective: none;
+  transform-style: preserve-3d;
+}
+
+html[data-view="3d"] .tile .tile-inner{
+  position: relative;
+  transform-style: preserve-3d;
+  border-radius: 3px;
+  background-image: linear-gradient(145deg, rgba(255,255,255,.16), rgba(0,0,0,.2));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2);
+  transform: translateZ(0);
+}
+
+/* right and bottom faces give every tile thickness */
+html[data-view="3d"] .tile .tile-inner::before,
+html[data-view="3d"] .tile .tile-inner::after{
+  content: "";
+  position: absolute;
+  background: inherit;
+  filter: brightness(.55);
+}
+
+html[data-view="3d"] .tile .tile-inner::before{
+  top: -2px;
+  left: calc(100% + 2px);
+  width: var(--d);
+  height: calc(100% + 4px);
+  transform-origin: left center;
+  transform: rotateY(90deg);
+}
+
+html[data-view="3d"] .tile .tile-inner::after{
+  left: -2px;
+  top: calc(100% + 2px);
+  width: calc(100% + 4px);
+  height: var(--d);
+  transform-origin: center top;
+  transform: rotateX(-90deg);
+}
+
+html[data-view="3d"] .tile.hint .tile-inner{
+  box-shadow: 0 0 0 1px var(--accent) inset, 0 0 16px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+html[data-view="3d"] .tile.filled .tile-inner{ animation: pop3d 0.2s ease; }
+
+@keyframes pop3d{
+  0%{ transform: translateZ(0) scale(.9); }
+  50%{ transform: translateZ(20px) scale(1.06); }
+  100%{ transform: translateZ(0) scale(1); }
+}
+
+/* reveal: the cube lifts, turns edge-on, changes colour, settles back */
+html[data-view="3d"] .tile.flip .tile-inner{
+  animation: flip3d 0.75s ease forwards;
+  animation-delay: var(--flip-delay, 0s);
+}
+
+@keyframes flip3d{
+  0%{ transform: translateZ(0) rotateX(0deg); }
+  45%{ transform: translateZ(28px) rotateX(-90deg); }
+  55%{
+    transform: translateZ(28px) rotateX(-90deg);
+    background-color: var(--reveal-bg);
+    border-color: var(--reveal-bg);
+    color: var(--paper);
+  }
+  100%{
+    transform: translateZ(0) rotateX(0deg);
+    background-color: var(--reveal-bg);
+    border-color: var(--reveal-bg);
+    color: var(--paper);
+  }
+}
+
+html[data-view="3d"] .board.picking .tile.pick .tile-inner{
+  animation: pick3d 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes pick3d{
+  from{ transform: translateZ(0); }
+  to{ transform: translateZ(16px); }
+}
+
+/* keycaps */
+html[data-view="3d"] .keyboard-wrap{ perspective: 900px; }
+
+html[data-view="3d"] .keyboard{
+  transform: rotateX(12deg);
+  transform-origin: 50% 0;
+}
+
+html[data-view="3d"] .key{
+  border-radius: 6px;
+  background-image: linear-gradient(180deg, rgba(255,255,255,.16), rgba(0,0,0,.14));
+  box-shadow: 0 4px 0 rgba(0,0,0,.45), 0 9px 12px rgba(0,0,0,.28);
+  transition: transform 0.06s ease, box-shadow 0.06s ease, background-color 0.15s ease;
+}
+
+html[data-view="3d"] .key:active{
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0,0,0,.45), 0 3px 6px rgba(0,0,0,.28);
+}
+
+/* raised panels and chunky buttons */
+html[data-view="3d"] .depboard,
+html[data-view="3d"] .leaderboard-panel,
+html[data-view="3d"] .length-bar{
+  box-shadow: 0 6px 0 rgba(0,0,0,.28), 0 20px 34px rgba(0,0,0,.32);
+}
+
+html[data-view="3d"] .action-btn{
+  box-shadow: 0 4px 0 rgba(0,0,0,.4), 0 10px 16px rgba(0,0,0,.2);
+  transition: transform 0.08s ease, box-shadow 0.08s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+html[data-view="3d"] .action-btn:hover:not(:disabled){ transform: translateY(-2px); }
+
+html[data-view="3d"] .action-btn:active:not(:disabled){
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0,0,0,.4);
+}
+
+@media (prefers-reduced-motion: reduce){
+  html[data-view="3d"] .board{ transition: none; }
+  html[data-view="3d"] .tile.flip .tile-inner,
+  html[data-view="3d"] .tile.filled .tile-inner{ animation-duration: 0.01s; }
+}
+
+/* Header: three small buttons (view, switch player, reset) need to fit */
+.depboard-left{ min-width: 0; flex: 1 1 auto; }
+.depboard-right{ gap: 6px; flex-wrap: wrap; justify-content: flex-end; flex: 0 1 auto; }
+.depboard-right .icon-btn{ width: 30px; height: 30px; font-size: 14px; flex: 0 0 auto; }
+.depboard-right .counter{ min-width: 42px; padding: 4px 6px; }
+
+@media (max-width: 560px){
+  .title{ font-size: 17px; }
+  .depboard{ flex-wrap: wrap; }
+  .depboard-right{ width: 100%; justify-content: space-between; }
+}
