@@ -1323,3 +1323,25 @@ body{
   border: 1px solid var(--tile-border);
 }
 .overlay-card .overlay-btn-secondary:hover:not(:disabled){ border-color: var(--paper-dim); }
+
+
+/* ---------- Hint: select, then tap a tile ---------- */
+
+.action-btn.armed{
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.board.picking .tile.pick{ cursor: pointer; }
+
+.board.picking .tile.pick .tile-inner{
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  animation: pickPulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes pickPulse{
+  from{ transform: scale(1); }
+  to{ transform: scale(1.06); }
+}

@@ -910,6 +910,7 @@ function newRound(keepRoundNumber, forcedAnswer){
   state.gameOver = false;
   state.keyStatus = {};
   if (!keepRoundNumber) state.round += 1;
+  setHintArmed(false);
   schedulePresence();
   renderBoard();
   renderKeyboard();
@@ -960,6 +961,7 @@ function renderBoard(){
     }
     boardEl.appendChild(rowEl);
   }
+  if (hintArmed) markPickable();
 }
 
 function renderKeyboard(){
@@ -989,6 +991,7 @@ function updateCounters(){
   bestValueEl.textContent = String(state.best);
   pointsValueEl.textContent = String(state.points);
   hintBtn.disabled = state.points < HINT_COST || state.gameOver;
+  if (hintArmed && hintBtn.disabled) setHintArmed(false);
   revealBtn.disabled = state.points < revealCost() || state.gameOver;
   revealCostEl.textContent = `${revealCost()} pts`;
 }
@@ -1038,7 +1041,44 @@ function handleKey(key){
   }
 }
 
+// Hints are chosen, not automatic: pressing HINT "selects" it (nothing is
+// spent), then the player taps the tile they want revealed. After the hint is
+// used (or cancelled) the button is unselected again.
+let hintArmed = false;
+
+function hintCandidates(){
+  const known = new Set();
+  state.results.forEach(res => res.forEach((st, i) => { if (st === "correct") known.add(i); }));
+  state.locked.forEach((isLocked, i) => { if (isLocked) known.add(i); });
+  return Array.from({ length: WORD_LENGTH }, (_, i) => i).filter(i => !known.has(i));
+}
+
+function markPickable(){
+  const r = state.guesses.length;
+  const open = hintArmed ? new Set(hintCandidates()) : new Set();
+  boardEl.classList.toggle("picking", hintArmed);
+  for (let c = 0; c < WORD_LENGTH; c++){
+    const tile = document.getElementById(`tile-${r}-${c}`);
+    if (tile) tile.classList.toggle("pick", open.has(c));
+  }
+  // Clear any leftovers on rows that are no longer active.
+  boardEl.querySelectorAll(".tile.pick").forEach((t) => {
+    if (!t.id.startsWith(`tile-${r}-`)) t.classList.remove("pick");
+  });
+}
+
+function setHintArmed(on){
+  hintArmed = Boolean(on);
+  hintBtn.classList.toggle("armed", hintArmed);
+  hintBtn.setAttribute("aria-pressed", hintArmed ? "true" : "false");
+  markPickable();
+}
+
 function useHint(){
+  if (hintArmed){            // pressing HINT again cancels
+    setHintArmed(false);
+    return;
+  }
   if (state.gameOver){
     showToast("No active round");
     return;
@@ -1047,24 +1087,42 @@ function useHint(){
     showToast("Not enough points");
     return;
   }
-  const known = new Set();
-  state.results.forEach(res => res.forEach((s, i) => { if (s === "correct") known.add(i); }));
-  state.locked.forEach((isLocked, i) => { if (isLocked) known.add(i); });
-  const remaining = Array.from({ length: WORD_LENGTH }, (_, i) => i).filter(i => !known.has(i));
-  if (remaining.length === 0){
+  if (hintCandidates().length === 0){
     showToast("Every letter is already revealed");
     return;
   }
-  const idx = remaining[Math.floor(Math.random() * remaining.length)];
+  setHintArmed(true);
+  showToast("Tap a tile in the current row to reveal its letter");
+}
+
+function applyHint(idx){
+  if (state.gameOver || state.points < HINT_COST || !hintCandidates().includes(idx)){
+    setHintArmed(false);
+    return;
+  }
   state.slots[idx] = state.answer[idx];
   state.locked[idx] = true;
   state.points -= HINT_COST;
+  setHintArmed(false);       // unselect after use
   updateCounters();
   updateCurrentRow();
   if (state.playerName){
     spendPoints(state.playerName, state.points);
   }
 }
+
+boardEl.addEventListener("click", (e) => {
+  if (!hintArmed) return;
+  const tile = e.target.closest(".tile");
+  if (!tile) return;
+  const m = /^tile-(\d+)-(\d+)$/.exec(tile.id);
+  if (!m || Number(m[1]) !== state.guesses.length) return;
+  applyHint(Number(m[2]));
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && hintArmed) setHintArmed(false);
+});
 
 // Ends the round by showing the answer. No points are awarded, and the
 // streak is left as it is. Called directly when the paying player clicks
@@ -1112,6 +1170,7 @@ function updateCurrentRow(){
     tile.classList.toggle("filled", Boolean(letter));
     tile.classList.toggle("hint", Boolean(state.locked[c]));
   }
+  markPickable();
   schedulePresence();
 }
 
@@ -1270,11 +1329,27 @@ function revealRow(r, guess, result, onDone){
 
 /* ---------- Event listeners ---------- */
 
+const anyOverlayOpen = () => document.querySelector(".overlay.show") !== null;
+
 document.addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // A button that still has focus from an earlier click (HINT, REVEAL, an
+  // on-screen key...) would be "clicked" again by Enter or Space. Stop that so
+  // nothing is ever triggered unless the player actually clicks it.
+  if ((k === "enter" || k === " ") && !anyOverlayOpen() && e.target.closest && e.target.closest("button")){
+    e.preventDefault();
+    e.target.blur();
+  }
   if (k === "backspace") handleKey("back");
   else if (k === "enter") handleKey("enter");
   else if (/^[a-z]$/.test(k)) handleKey(k);
+});
+
+// Don't leave game buttons focused after a click.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest && e.target.closest("button");
+  if (b && !b.closest(".overlay")) b.blur();
 });
 
 restartBtn.addEventListener("click", resetSession);
