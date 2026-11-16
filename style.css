@@ -1390,108 +1390,140 @@ html[data-view="3d"] body::before{
   mask-image: linear-gradient(to top, #000, transparent 85%);
 }
 
-/* the board is a tilted slab of cubes */
-html[data-view="3d"] .board-wrap{
-  perspective: 1100px;
-  perspective-origin: 50% 25%;
-  padding: 6px 0 14px;
-}
-
+/* the DOM board keeps running the game but is hidden; the cubes are drawn by the stage */
 html[data-view="3d"] .board{
-  --tilt-x: 16deg;
-  --tilt-y: 0deg;
-  gap: 9px;
-  transform-style: preserve-3d;
-  transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
-  transition: transform 0.15s ease-out;
-}
-
-html[data-view="3d"] .board-row{ gap: 9px; transform-style: preserve-3d; }
-
-html[data-view="3d"] .tile{
-  --d: 14px;
-  perspective: none;
-  transform-style: preserve-3d;
-}
-
-html[data-view="3d"] .tile .tile-inner{
-  position: relative;
-  transform-style: preserve-3d;
-  border-radius: 3px;
-  background-image: linear-gradient(145deg, rgba(255,255,255,.16), rgba(0,0,0,.2));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.2);
-  transform: translateZ(0);
-}
-
-/* right and bottom faces give every tile thickness */
-html[data-view="3d"] .tile .tile-inner::before,
-html[data-view="3d"] .tile .tile-inner::after{
-  content: "";
   position: absolute;
-  background: inherit;
-  filter: brightness(.55);
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  pointer-events: none;
 }
 
-html[data-view="3d"] .tile .tile-inner::before{
-  top: -2px;
-  left: calc(100% + 2px);
-  width: var(--d);
-  height: calc(100% + 4px);
-  transform-origin: left center;
-  transform: rotateY(90deg);
+html[data-view="3d"] .board-wrap{ position: relative; flex-direction: column; align-items: center; }
+
+.stage3d{ display: none; }
+
+html[data-view="3d"] .stage3d{
+  display: block;
+  position: relative;
+  width: 100%;
+  height: var(--stage-h, 460px);
+  perspective: 1250px;
+  perspective-origin: 50% 35%;
+  touch-action: manipulation;
 }
 
-html[data-view="3d"] .tile .tile-inner::after{
-  left: -2px;
-  top: calc(100% + 2px);
-  width: calc(100% + 4px);
-  height: var(--d);
-  transform-origin: center top;
-  transform: rotateX(-90deg);
+.world3d{
+  position: absolute;
+  left: 50%;
+  top: var(--floor-y, 420px);
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--cam-x, -14deg)) rotateY(var(--cam-y, 0deg));
+  transition: transform 0.25s ease-out;
 }
 
-html[data-view="3d"] .tile.hint .tile-inner{
-  box-shadow: 0 0 0 1px var(--accent) inset, 0 0 16px color-mix(in srgb, var(--accent) 55%, transparent);
+/* the platform the tower stands on */
+.floor3d{
+  position: absolute;
+  width: calc(var(--cell, 60px) * (var(--cols3, 5) + 1));
+  height: calc(var(--cell, 60px) * 2.4);
+  left: calc(var(--cell, 60px) * (var(--cols3, 5) + 1) / -2);
+  top: 0;
+  border-radius: 14px;
+  background:
+    linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(180deg, color-mix(in srgb, var(--paper) 14%, transparent), color-mix(in srgb, var(--paper) 4%, transparent));
+  border: 1px solid color-mix(in srgb, var(--paper) 28%, transparent);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--accent) 18%, transparent);
+  transform: translateZ(calc(var(--cell, 60px) * -1.2)) rotateX(90deg);
+  transform-origin: 50% 0;
 }
 
-html[data-view="3d"] .tile.filled .tile-inner{ animation: pop3d 0.2s ease; }
-
-@keyframes pop3d{
-  0%{ transform: translateZ(0) scale(.9); }
-  50%{ transform: translateZ(20px) scale(1.06); }
-  100%{ transform: translateZ(0) scale(1); }
+/* ghost placeholder for the next letters of the current row */
+.slot3d{
+  position: absolute;
+  left: calc(var(--s, 54px) / -2);
+  top: calc(var(--s, 54px) / -2);
+  width: var(--s, 54px);
+  height: var(--s, 54px);
+  border: 2px dashed color-mix(in srgb, var(--paper) 40%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--paper) 6%, transparent);
+  cursor: pointer;
 }
 
-/* reveal: the cube lifts, turns edge-on, changes colour, settles back */
-html[data-view="3d"] .tile.flip .tile-inner{
-  animation: flip3d 0.75s ease forwards;
-  animation-delay: var(--flip-delay, 0s);
+.slot3d.pick{
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  animation: slotPulse 0.8s ease-in-out infinite alternate;
 }
 
-@keyframes flip3d{
-  0%{ transform: translateZ(0) rotateX(0deg); }
-  45%{ transform: translateZ(28px) rotateX(-90deg); }
-  55%{
-    transform: translateZ(28px) rotateX(-90deg);
-    background-color: var(--reveal-bg);
-    border-color: var(--reveal-bg);
-    color: var(--paper);
-  }
-  100%{
-    transform: translateZ(0) rotateX(0deg);
-    background-color: var(--reveal-bg);
-    border-color: var(--reveal-bg);
-    color: var(--paper);
-  }
+@keyframes slotPulse{ from{ opacity: .55; } to{ opacity: 1; } }
+
+/* one cube: anchor at its centre, six faces around it */
+.cube3d{
+  --blk: color-mix(in srgb, var(--paper) 16%, var(--panel-solid));
+  --ink: var(--paper);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+  cursor: default;
 }
 
-html[data-view="3d"] .board.picking .tile.pick .tile-inner{
-  animation: pick3d 0.9s ease-in-out infinite alternate;
+.cube3d[data-state="correct"]{ --blk: var(--correct); --ink: #ffffff; }
+.cube3d[data-state="present"]{ --blk: var(--present); --ink: #ffffff; }
+.cube3d[data-state="absent"]{ --blk: var(--absent); --ink: var(--absent-text); }
+
+.cube3d .face{
+  --shade: 0;
+  --lite: 0;
+  position: absolute;
+  left: calc(var(--s, 54px) / -2);
+  top: calc(var(--s, 54px) / -2);
+  width: var(--s, 54px);
+  height: var(--s, 54px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: calc(var(--s, 54px) * 0.12);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: calc(var(--s, 54px) * 0.58);
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--ink);
+  background-color: var(--blk);
+  background-image:
+    linear-gradient(rgba(255,255,255,var(--lite)), rgba(255,255,255,var(--lite))),
+    linear-gradient(rgba(0,0,0,var(--shade)), rgba(0,0,0,var(--shade)));
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.14), inset 0 -6px 12px rgba(0,0,0,.12);
+  backface-visibility: hidden;
+  user-select: none;
 }
 
-@keyframes pick3d{
-  from{ transform: translateZ(0); }
-  to{ transform: translateZ(16px); }
+.cube3d .f{ transform: translateZ(calc(var(--s, 54px) / 2)); }
+.cube3d .b{ transform: rotateY(180deg) translateZ(calc(var(--s, 54px) / 2)); --shade: .32; }
+.cube3d .r{ transform: rotateY(90deg) translateZ(calc(var(--s, 54px) / 2)); --shade: .2; }
+.cube3d .l{ transform: rotateY(-90deg) translateZ(calc(var(--s, 54px) / 2)); --shade: .38; }
+.cube3d .t{ transform: rotateX(90deg) translateZ(calc(var(--s, 54px) / 2)); --lite: .22; }
+.cube3d .d{ transform: rotateX(-90deg) translateZ(calc(var(--s, 54px) / 2)); --shade: .55; }
+
+.cube3d.hint .face{
+  color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--accent), 0 0 18px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.cube3d.pick .face{
+  box-shadow: inset 0 0 0 3px var(--accent), 0 0 22px var(--accent);
+  animation: slotPulse 0.8s ease-in-out infinite alternate;
 }
 
 /* keycaps */
@@ -1550,3 +1582,18 @@ html[data-view="3d"] .action-btn:active:not(:disabled){
   .depboard{ flex-wrap: wrap; }
   .depboard-right{ width: 100%; justify-content: space-between; }
 }
+
+
+/* 3D view: compact chrome so the whole tower fits on screen */
+html[data-view="3d"] .length-bar{ padding: 4px 10px; }
+html[data-view="3d"] .length-label em{ display: none; }
+html[data-view="3d"] .length-picker button{ padding: 5px 14px; }
+html[data-view="3d"] .action-btn{ padding: 8px 6px; font-size: 10.5px; }
+html[data-view="3d"] .key{ height: 44px; }
+
+@media (min-width: 560px){
+  html[data-view="3d"] .action-bar{ grid-template-columns: repeat(4, 1fr); }
+}
+
+html[data-view="3d"] .action-btn{ white-space: nowrap; letter-spacing: 0; }
+html[data-view="3d"] .action-btn-cost{ margin-left: 3px; }

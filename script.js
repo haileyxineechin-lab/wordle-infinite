@@ -620,6 +620,7 @@ async function startWithName(name){
     saveName(trimmed);
     subtitleText.textContent = `playing as ${trimmed}`;
     nameOverlay.classList.remove("show");
+    if (state.answer && state.answer.length !== WORD_LENGTH) newRound(true);
     return;
   }
   // A different account always starts from a clean slate (streak 0),
@@ -1706,6 +1707,347 @@ renderSwatches(bgSwatchesEl, bgStopsEl, () => theme.bg.stops);
 renderSwatches(textSwatchesEl, textStopsEl, () => theme.text.stops);
 applyTheme();
 
+/* ---------- 3D block tower ----------
+   In the 3D view the DOM board stays the source of truth (it is hidden) and
+   this layer mirrors it with real cubes: typed letters drop in and bounce,
+   submitted rows spin to reveal their colour, rows stack upward, deleted or
+   old blocks tumble away. */
+
+const stage3d = document.getElementById("stage3d");
+const world3d = document.getElementById("world3d");
+const TAU = Math.PI * 2;
+const calmMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const blocks = new Map();     // "r-c" -> block
+const debris = [];            // blocks flying away
+const slotEls = new Map();    // column -> ghost placeholder for the current row
+let blocksActive = false;
+let cols3 = WORD_LENGTH;
+let cell = 60;
+let boxS = 54;
+let stageH = 460;
+let rafId = 0;
+let lastT = 0;
+let wasWin = false;
+let wasLose = false;
+
+const GRAVITY = () => cell * 42;
+const restH = (r) => r * cell + cell / 2;
+const xOf = (c) => (c - (cols3 - 1) / 2) * cell;
+const easeInOut = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+const rnd = (a = 1) => (Math.random() - 0.5) * 2 * a;
+
+function layout3D(){
+  const wrapW = (stage3d.parentElement && stage3d.parentElement.clientWidth) || 480;
+  // leave room for the header, buttons and keyboard around the tower
+  const budget = Math.max(300, window.innerHeight - 375);
+  cell = Math.floor(Math.min(88, (wrapW - 20) / (cols3 + 0.6), (budget - 40) / 6.3));
+  cell = Math.max(38, cell);
+  boxS = Math.round(cell * 0.9);
+  stageH = Math.round(cell * 6.3 + 40);
+  const st = stage3d.style;
+  st.setProperty("--cell", `${cell}px`);
+  st.setProperty("--s", `${boxS}px`);
+  st.setProperty("--stage-h", `${stageH}px`);
+  st.setProperty("--floor-y", `${stageH - 26}px`);
+  st.setProperty("--cols3", String(cols3));
+}
+
+function makeCube(letter){
+  const el = document.createElement("div");
+  el.className = "cube3d";
+  [["f", true], ["b", true], ["r", true], ["l", true], ["t", false], ["d", false]].forEach(([k, hasLetter]) => {
+    const f = document.createElement("div");
+    f.className = `face ${k}`;
+    if (hasLetter) f.textContent = letter;
+    el.appendChild(f);
+  });
+  return el;
+}
+
+function applyTransform(o, offX = 0, extraH = 0){
+  o.el.style.transform =
+    `translate3d(${(o.x + offX).toFixed(1)}px, ${(-(o.h + extraH)).toFixed(1)}px, ${(o.z || 0).toFixed(1)}px) ` +
+    `rotateX(${(o.ax * 180 / Math.PI).toFixed(1)}deg) rotateY(${(o.ay * 180 / Math.PI).toFixed(1)}deg) rotateZ(${(o.az * 180 / Math.PI).toFixed(1)}deg)`;
+}
+
+function spawnBlock(r, c, letter, instant){
+  const el = makeCube(letter);
+  el.dataset.r = r;
+  el.dataset.c = c;
+  el.dataset.state = "idle";
+  world3d.appendChild(el);
+  const b = {
+    el, r, c, letter, x: xOf(c), z: 0,
+    h: restH(r), vh: 0, falling: false,
+    ax: 0, ay: 0, az: 0, vx: 0, vy: 0, vz: 0,
+    result: null, revealed: false, anim: null,
+    shaking: false, shakeStart: 0, shakeEnd: 0, needsApply: true
+  };
+  if (!instant && !calmMotion){
+    b.h = Math.min(stageH - 26 + cell * 0.6, restH(r) + cell * (3 + Math.random() * 0.6));
+    b.vh = -cell * (1 + Math.random() * 3);
+    b.falling = true;
+    b.ax = rnd(2.6); b.ay = rnd(3.1); b.az = rnd(1.4);
+    b.vx = rnd(7); b.vy = rnd(9); b.vz = rnd(5);
+  }
+  blocks.set(`${r}-${c}`, b);
+  return b;
+}
+
+function toDebris(b, kind){
+  blocks.delete(`${b.r}-${b.c}`);
+  if (calmMotion){ b.el.remove(); return; }
+  const big = kind === "explode";
+  b.falling = false;
+  b.anim = null;
+  b.vhd = big ? cell * (2 + Math.random() * 7) : cell * (4 + Math.random() * 3);
+  b.vxd = rnd(big ? cell * 5 : cell * 2.5);
+  b.vzd = big ? cell * (2 + Math.random() * 6) : cell * (1 + Math.random() * 3);
+  b.vx = rnd(big ? 9 : 6); b.vy = rnd(big ? 9 : 6); b.vz = rnd(big ? 9 : 6);
+  b.age = 0;
+  b.debris = true;
+  debris.push(b);
+}
+
+function stepBlock(b, now, dt){
+  let busy = false;
+  const rest = restH(b.r);
+
+  if (b.falling){
+    busy = true;
+    b.vh -= GRAVITY() * dt;
+    b.h += b.vh * dt;
+    if (b.h <= rest){
+      b.h = rest;
+      if (Math.abs(b.vh) > cell * 2.4) b.vh = -b.vh * 0.3;
+      else { b.vh = 0; b.falling = false; }
+    }
+  }
+
+  // wobble back to upright (spring toward 0 rotation)
+  const W = 11, Z = 0.42;
+  for (const k of ["x", "y", "z"]){
+    let a = b["a" + k], v = b["v" + k];
+    if (a === 0 && v === 0) continue;
+    v += (-W * W * a - 2 * Z * W * v) * dt;
+    a += v * dt;
+    if (Math.abs(a) < 0.003 && Math.abs(v) < 0.02){ a = 0; v = 0; } else busy = true;
+    b["a" + k] = a; b["v" + k] = v;
+  }
+
+  let extraH = 0;
+  let offX = 0;
+  let ax = b.ax, ay = b.ay;
+  if (b.anim){
+    busy = true;
+    const an = b.anim;
+    const p = (now - an.t0) / an.dur;
+    if (p >= 1){
+      if (an.type === "flip" && !b.revealed){ b.revealed = true; b.el.dataset.state = b.result; }
+      b.anim = null;
+    } else if (p >= 0){
+      const e = easeInOut(p);
+      if (an.type === "flip"){
+        ax = -e * TAU;
+        extraH = Math.sin(Math.PI * p) * cell * 0.85;
+        if (p >= 0.5 && !b.revealed){ b.revealed = true; b.el.dataset.state = b.result; }
+      } else {
+        ay = e * TAU;
+        extraH = Math.abs(Math.sin(Math.PI * p * 2)) * cell * 0.7;
+      }
+    }
+  }
+  if (now < b.shakeEnd){
+    busy = true;
+    const p = (now - b.shakeStart) / (b.shakeEnd - b.shakeStart);
+    offX = Math.sin((now - b.shakeStart) * 0.06) * cell * 0.12 * (1 - p);
+  }
+  if (busy || b.needsApply){
+    const keepX = b.ax, keepY = b.ay;
+    b.ax = ax; b.ay = ay;
+    applyTransform(b, offX, extraH);
+    b.ax = keepX; b.ay = keepY;
+    b.needsApply = busy;
+  }
+  return busy;
+}
+
+function stepDebris(b, dt){
+  b.age += dt;
+  b.vhd -= GRAVITY() * dt;
+  b.h += b.vhd * dt;
+  b.x += b.vxd * dt;
+  b.z += b.vzd * dt;
+  b.ax += b.vx * dt; b.ay += b.vy * dt; b.az += b.vz * dt;
+  applyTransform(b);
+  if (b.age > 1.3) b.el.style.opacity = String(Math.max(0, 1 - (b.age - 1.3) / 0.5));
+  return b.age < 1.8 && b.h > -cell * 5;
+}
+
+function frame3D(t){
+  rafId = 0;
+  if (!blocksActive) return;
+  const dt = Math.min(0.033, Math.max(0.001, (t - lastT) / 1000 || 0.016));
+  lastT = t;
+  let busy = false;
+  blocks.forEach((b) => { if (stepBlock(b, t, dt)) busy = true; });
+  for (let i = debris.length - 1; i >= 0; i--){
+    if (stepDebris(debris[i], dt)) busy = true;
+    else { debris[i].el.remove(); debris.splice(i, 1); }
+  }
+  if (busy) kick3D();
+}
+
+function kick3D(){
+  if (!blocksActive || rafId) return;
+  if (!lastT) lastT = performance.now();
+  rafId = requestAnimationFrame(frame3D);
+}
+
+function clearBlocks(){
+  blocks.forEach((b) => b.el.remove());
+  blocks.clear();
+  debris.forEach((b) => b.el.remove());
+  debris.length = 0;
+  slotEls.forEach((el) => el.remove());
+  slotEls.clear();
+}
+
+function syncBlocks(instant = false){
+  if (!blocksActive) return;
+  const now = performance.now();
+  if (cols3 !== WORD_LENGTH){
+    cols3 = WORD_LENGTH;
+    layout3D();
+    clearBlocks();
+    instant = true;
+  }
+  let curRow = 0;
+  const gone = [];
+  for (let r = 0; r < MAX_GUESSES; r++){
+    for (let c = 0; c < cols3; c++){
+      const tile = document.getElementById(`tile-${r}-${c}`);
+      if (!tile) continue;
+      const inner = tile.querySelector(".tile-inner");
+      const letter = ((inner && inner.textContent) || "").trim().toLowerCase();
+      const result = ["correct", "present", "absent"].find((k) => tile.classList.contains(k)) || null;
+      if (result && r + 1 > curRow) curRow = r + 1;
+      const key = `${r}-${c}`;
+      let b = blocks.get(key);
+      if (b && b.letter !== letter){ gone.push(b); blocks.delete(key); b = null; }
+      if (letter && !b) b = spawnBlock(r, c, letter, instant || (Boolean(result) && !tile.classList.contains("flip")));
+      if (!b) continue;
+
+      if (result && !b.result){
+        b.result = result;
+        if (tile.classList.contains("flip") && !instant && !calmMotion){
+          const delay = (parseFloat(tile.style.getPropertyValue("--flip-delay")) || 0) * 1000;
+          b.anim = { type: "flip", t0: now + delay, dur: 780 };
+        } else {
+          b.revealed = true;
+          b.el.dataset.state = result;
+        }
+      }
+      b.el.classList.toggle("hint", tile.classList.contains("hint"));
+      b.el.classList.toggle("pick", tile.classList.contains("pick"));
+      const sh = tile.classList.contains("shake");
+      if (sh && !b.shaking && !calmMotion){ b.shakeStart = now; b.shakeEnd = now + 450; }
+      b.shaking = sh;
+      b.needsApply = true;
+    }
+  }
+  const explode = gone.length >= 3;
+  gone.forEach((b) => toDebris(b, explode ? "explode" : "pop"));
+
+  // ghost placeholders on the row being filled
+  for (let c = 0; c < cols3; c++){
+    let slot = slotEls.get(c);
+    const tile = curRow < MAX_GUESSES ? document.getElementById(`tile-${curRow}-${c}`) : null;
+    const occupied = blocks.has(`${curRow}-${c}`);
+    if (!tile || occupied){
+      if (slot) slot.style.display = "none";
+      continue;
+    }
+    if (!slot){
+      slot = document.createElement("div");
+      slot.className = "slot3d";
+      world3d.appendChild(slot);
+      slotEls.set(c, slot);
+    }
+    slot.dataset.r = curRow;
+    slot.dataset.c = c;
+    slot.style.display = "";
+    slot.style.transform = `translate3d(${xOf(c)}px, ${-restH(curRow)}px, 0)`;
+    slot.classList.toggle("pick", tile.classList.contains("pick"));
+  }
+  kick3D();
+}
+
+function celebrate3D(){
+  if (calmMotion) return;
+  const now = performance.now();
+  blocks.forEach((b) => {
+    if (!b.revealed) return;
+    b.anim = { type: "hop", t0: now + b.r * 90 + b.c * 70, dur: 950 };
+  });
+  kick3D();
+}
+
+function wobble3D(){
+  if (calmMotion) return;
+  const now = performance.now();
+  blocks.forEach((b) => { b.shakeStart = now; b.shakeEnd = now + 600; });
+  kick3D();
+}
+
+let syncQueued = false;
+function queueSync(){
+  if (!blocksActive || syncQueued) return;
+  syncQueued = true;
+  requestAnimationFrame(() => { syncQueued = false; syncBlocks(false); });
+}
+
+new MutationObserver(queueSync).observe(boardEl, {
+  subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class", "style"]
+});
+
+new MutationObserver(() => {
+  const win = messageRail.classList.contains("win");
+  const lose = messageRail.classList.contains("lose");
+  if (win && !wasWin) celebrate3D();
+  if (lose && !wasLose) wobble3D();
+  wasWin = win;
+  wasLose = lose;
+}).observe(messageRail, { attributes: true, attributeFilter: ["class"] });
+
+// Clicking a block (or its ghost slot) taps the matching hidden tile, so
+// "pick a tile for the hint" works in 3D too.
+stage3d.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-r]");
+  if (!t) return;
+  const tile = document.getElementById(`tile-${t.dataset.r}-${t.dataset.c}`);
+  if (tile) tile.click();
+});
+
+function activate3D(on){
+  blocksActive = Boolean(on);
+  if (rafId){ cancelAnimationFrame(rafId); rafId = 0; }
+  clearBlocks();
+  if (!blocksActive) return;
+  cols3 = WORD_LENGTH;
+  layout3D();
+  lastT = performance.now();
+  syncBlocks(true);
+}
+
+let resizeTimer = 0;
+window.addEventListener("resize", () => {
+  if (!blocksActive) return;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => activate3D(true), 150);
+});
+
 /* ---------- View: 2D classic or 3D ---------- */
 
 const VIEW_KEY = "wordleInfiniteView";
@@ -1728,10 +2070,7 @@ function setView(v, { save = true } = {}){
   // The button shows what you would switch to.
   viewBtn.textContent = viewMode === "3d" ? "2D" : "3D";
   viewBtn.title = viewMode === "3d" ? "Switch to the classic 2D view" : "Switch to the 3D view";
-  if (viewMode === "2d"){
-    boardEl.style.removeProperty("--tilt-x");
-    boardEl.style.removeProperty("--tilt-y");
-  }
+  activate3D(viewMode === "3d");
 }
 
 startViews.addEventListener("click", (e) => {
@@ -1745,8 +2084,8 @@ document.addEventListener("pointermove", (e) => {
   if (viewMode !== "3d" || reduceMotion) return;
   const x = e.clientX / window.innerWidth - 0.5;
   const y = e.clientY / window.innerHeight - 0.5;
-  boardEl.style.setProperty("--tilt-y", `${(x * 20).toFixed(1)}deg`);
-  boardEl.style.setProperty("--tilt-x", `${(16 - y * 12).toFixed(1)}deg`);
+  stage3d.style.setProperty("--cam-y", `${(x * 26).toFixed(1)}deg`);
+  stage3d.style.setProperty("--cam-x", `${(-14 + y * 8).toFixed(1)}deg`);
 });
 
 setView(viewMode, { save: false });

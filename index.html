@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script>try{document.documentElement.dataset.view=localStorage.getItem("wordleInfiniteView")==="3d"?"3d":"2d"}catch(e){document.documentElement.dataset.view="2d"}</script>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -92,6 +92,9 @@
 
     <main class="board-wrap">
       <div id="board" class="board"></div>
+      <div id="stage3d" class="stage3d" aria-hidden="true">
+        <div id="world3d" class="world3d"><div class="floor3d"></div></div>
+      </div>
     </main>
 
     <footer class="keyboard-wrap">
@@ -232,6 +235,6 @@
 
 <div id="toast" class="toast"></div>
 
-<script type="module" src="script.js?v=4"></script>
+<script type="module" src="script.js?v=5"></script>
 </body>
 </html>
